@@ -109,7 +109,17 @@ Tampoco se ha escuchado nunca: es lo primero que debes oír.
 - [ ] Con un solo orbe, ya suena a pieza completa.
 - [ ] Sin cortes de audio en pleno concierto con muchos orbes.
 
-## 9. Pausa y reanudación
+## 9. Campo de visión
+
+Comprobado con el perfil de las VR Glasses del emulador. En el visor, confirma
+la sensación.
+
+- [ ] Con la mirada al frente, Inicio se ve entero sin girar la cabeza.
+- [ ] "Saltar" y la mano fantasma se ven sin buscarlos.
+- [ ] Con la mano izquierda muy a un lado, el menú sigue a la vista.
+- [ ] Al mirar el menú, no se mueve mientras acercas el dedo.
+
+## 10. Pausa y reanudación
 
 - [ ] El menú del sistema pausa el sonido y el haz.
 - [ ] Al volver, todo sigue donde estaba, sin ráfagas de notas.
@@ -117,7 +127,7 @@ Tampoco se ha escuchado nunca: es lo primero que debes oír.
 - [ ] Salir y volver a entrar conserva el bucle.
 - [ ] Cerrar el navegador y reabrirlo muestra los guardados en Inicio.
 
-## 10. Primera experiencia
+## 11. Primera experiencia
 
 Dásela a alguien que no la conozca y no le expliques nada.
 

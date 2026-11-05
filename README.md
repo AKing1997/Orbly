@@ -66,6 +66,17 @@ room stay where they are: they are stuck to it.
 
 With controllers, the trigger pinches and X opens the menu.
 
+## Fits every headset
+
+Meta VR Glasses see far less than a Quest: 37 degrees to each side, 25 up and 43
+down. All essential UI is designed for that narrowest view, so nothing needs a
+separate version. The home screen and tutorial are laid out inside it, a unit
+test fails if anything leaves it, and the palm menu and messages are pulled back
+into view when a hand wanders off to the side.
+
+To preview it, set `dev.emulator.device` to `metaVRGlasses` in
+`iwsdk.config.json`: the emulator masks everything outside the glasses' view.
+
 ## Run it
 
 Requires Node 20.19+, 22.12+ or 24+.

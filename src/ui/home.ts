@@ -14,6 +14,7 @@ import {
   Vector3,
 } from '@iwsdk/core';
 import {
+  BASE_BELOW_HEAD,
   DEGREE_COUNT,
   polarToPosition,
   Stage,
@@ -25,26 +26,18 @@ import { SavedComposition, MAX_SAVES } from '../state/storage';
 import { lightMaterial } from '../visuals/materials';
 import { createCoreMaterial } from '../visuals/orbs';
 import { PALETTES } from '../visuals/palettes';
+import { homeSpot } from './home-layout';
 import { Label } from './label';
 import { t } from './strings';
 import { TouchTarget, TouchTargets } from './touch';
 
 const SHELL_COUNT = MAX_SAVES + 1;
-const NEW_RADIUS = 0.075;
-const SAVE_RADIUS = 0.062;
-const ARC_RADIUS = 0.44;
-const BELOW_EYES = 0.34;
-/** Angle between neighbouring spheres. */
-const ARC_STEP = 0.5;
+/** The labels sit at eye level, above the spheres, and further away. */
+const LABEL_DISTANCE = 0.8;
+const CHALLENGE_ABOVE_EYES = 0.0;
+const TITLE_ABOVE_EYES = 0.065;
 const SPIN_RATE = 0.35;
 const FADE_RATE = 9;
-
-function arcAngle(index: number): number {
-  // New sits in the middle; saves alternate outwards, nearest first.
-  if (index === 0) return 0;
-  const side = index % 2 === 1 ? 1 : -1;
-  return side * Math.ceil(index / 2) * ARC_STEP;
-}
 
 export class HomeScreen {
   readonly object = new Group();
@@ -212,16 +205,17 @@ export class HomeScreen {
 
   private layout(stage: Stage): void {
     this.targets.length = 0;
-    const y = stage.baseY + (DEGREE_COUNT * 0.07) / 2 + 0.06;
+    const eyeY = stage.baseY + BASE_BELOW_HEAD;
     const count = this.saves.length + 1;
     for (let index = 0; index < count; index++) {
+      const spot = homeSpot(index);
       const target: TouchTarget = {
         x: 0,
-        y: y - (index === 0 ? 0 : 0.02),
+        y: eyeY - spot.drop,
         z: 0,
-        radius: index === 0 ? NEW_RADIUS : SAVE_RADIUS,
+        radius: spot.radius,
       };
-      polarToPosition(arcAngle(index), ARC_RADIUS, stage, target);
+      polarToPosition(spot.azimuth, spot.reach, stage, target);
       this.targets.push(target);
     }
     this.touch.setTargets(this.targets);
@@ -229,11 +223,10 @@ export class HomeScreen {
 
     const newLoop = this.targets[0];
     this.plus.object.position.set(newLoop.x, newLoop.y, newLoop.z);
-    const eyeY = stage.baseY + 0.6;
-    polarToPosition(0, 0.8, stage, this.challenge.object.position);
-    this.challenge.object.position.y = eyeY - BELOW_EYES + 0.3;
-    polarToPosition(0, 0.8, stage, this.title.object.position);
-    this.title.object.position.y = eyeY - BELOW_EYES + 0.365;
+    polarToPosition(0, LABEL_DISTANCE, stage, this.challenge.object.position);
+    this.challenge.object.position.y = eyeY + CHALLENGE_ABOVE_EYES;
+    polarToPosition(0, LABEL_DISTANCE, stage, this.title.object.position);
+    this.title.object.position.y = eyeY + TITLE_ABOVE_EYES;
 
     let mini = 0;
     this.saves.forEach((save) => {

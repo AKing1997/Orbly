@@ -204,6 +204,8 @@ export class DemoDirector {
   private readonly cameraTarget = new Vector3();
   private readonly rest = new Vector3();
   private readonly palmCenter = new Vector3();
+  private readonly cameraForward = new Vector3(0, 0, -1);
+  private readonly cameraUp = new Vector3(0, 1, 0);
   private menuOpen = false;
   private fingerActive = false;
   private held = -1;
@@ -301,6 +303,13 @@ export class DemoDirector {
       key.lookHeight,
       stage.z - key.lookAhead,
     );
+    this.cameraForward
+      .subVectors(this.cameraTarget, this.cameraPosition)
+      .normalize();
+    this.cameraUp
+      .set(0, 1, 0)
+      .addScaledVector(this.cameraForward, -this.cameraForward.y)
+      .normalize();
     this.host.setCamera(this.cameraPosition, this.cameraTarget);
   }
 
@@ -641,10 +650,15 @@ export class DemoDirector {
     const { menu } = this.host;
     const palm = this.leftPose.position;
     this.palmCenter.copy(palm);
-    menu.setOpen(this.menuOpen, this.palmCenter, this.cameraPosition);
+    const view = {
+      position: this.cameraPosition,
+      forward: this.cameraForward,
+      up: this.cameraUp,
+    };
+    menu.setOpen(this.menuOpen, this.palmCenter, view);
     menu.update(
       this.palmCenter,
-      this.cameraPosition,
+      view,
       this.fingerActive ? this.goal : null,
       dt,
     );

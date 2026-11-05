@@ -20,6 +20,7 @@ import {
   Vector3,
 } from '@iwsdk/core';
 import { Vec3Like } from '../sequencer/mapping';
+import { HeadView, keepInView } from './comfort';
 import { lightMaterial } from '../visuals/materials';
 import { Palette } from '../visuals/palettes';
 import { ATLAS_COLUMNS, ATLAS_ROWS, drawIconAtlas, IconName, iconUv } from './icons';
@@ -57,6 +58,10 @@ const BUTTONS: readonly ButtonSpec[] = [
   { action: 'clear', icon: 'trash', column: 2, row: 2 },
   { action: 'home', icon: 'home', column: 3, row: 2 },
 ];
+
+/** Half the panel, plus the goal line above it. */
+const VIEW_HALF_WIDTH = 0.125;
+const VIEW_HALF_HEIGHT = 0.12;
 
 const CELL = 0.05;
 const GAP = 0.007;
@@ -266,11 +271,11 @@ export class PalmMenu {
     return this.object.localToWorld(out.set(rect.x, rect.y, 0));
   }
 
-  setOpen(open: boolean, palm: Vec3Like, head: Vec3Like): void {
+  setOpen(open: boolean, palm: Vec3Like, view: HeadView): void {
     if (open === this.open) return;
     this.open = open;
     if (open) {
-      this.computeTarget(palm, head);
+      this.computeTarget(palm, view);
       this.object.position.copy(this.target);
       this.object.quaternion.copy(this.targetQuaternion);
     } else {
@@ -281,7 +286,7 @@ export class PalmMenu {
 
   update(
     palm: Vec3Like,
-    head: Vec3Like,
+    view: HeadView,
     finger: Vec3Like | null,
     dt: number,
   ): void {
@@ -298,7 +303,7 @@ export class PalmMenu {
     }
 
     if (this.open) {
-      this.computeTarget(palm, head);
+      this.computeTarget(palm, view);
       const follow = 1 - Math.exp(
         -dt * (this.fingerNear ? SETTLED_RATE : FOLLOW_RATE),
       );
@@ -354,11 +359,17 @@ export class PalmMenu {
     this.uvAttribute.needsUpdate = true;
   }
 
-  private computeTarget(palm: Vec3Like, head: Vec3Like): void {
+  private computeTarget(palm: Vec3Like, view: HeadView): void {
     this.target.set(palm.x, palm.y + ABOVE_PALM, palm.z);
+    // A hand held out to the side would leave the panel off a narrow view.
+    keepInView(this.target, view, VIEW_HALF_WIDTH, VIEW_HALF_HEIGHT);
     // Faces the eyes, staying upright: lookAt points -Z of a matrix built with
     // eye = target, so looking from the head at the panel keeps +Z on the user.
-    this.lookAtMatrix.lookAt(head as Vector3, this.target, this.upAxis);
+    this.lookAtMatrix.lookAt(
+      view.position as Vector3,
+      this.target,
+      this.upAxis,
+    );
     this.targetQuaternion.setFromRotationMatrix(this.lookAtMatrix);
   }
 }

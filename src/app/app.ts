@@ -510,7 +510,7 @@ export class OrblyApp implements DemoHost {
     this.saveIfChanged();
     this.grabs.forEach((grab) => grab.cancel());
     this.palm.reset();
-    this.menu.setOpen(false, this.head.position, this.head.position);
+    this.menu.setOpen(false, this.head.position, this.head);
     this.beginSong(null);
     this.store.load(emptyComposition());
     this.saveId = null;
@@ -680,7 +680,7 @@ export class OrblyApp implements DemoHost {
     this.grabs.forEach((grab) => grab.cancel());
     this.pinches.forEach((pinch) => pinch.reset());
     this.palm.reset();
-    this.menu.setOpen(false, this.head.position, this.head.position);
+    this.menu.setOpen(false, this.head.position, this.head);
     this.saveIfChanged();
     this.tutorial.stop();
     this.home.hide();
@@ -905,7 +905,7 @@ export class OrblyApp implements DemoHost {
     if (this.mode === 'home') {
       this.home.update(this.tips, this.pinchPoints, this.pinchStarts, headPosition, dt);
       // Keeps fading out a menu that was just used to come here.
-      this.menu.update(headPosition, headPosition, null, dt);
+      this.menu.update(headPosition, this.head, null, dt);
       this.updateHand(left, 0, false, dt, time);
       this.updateHand(right, 1, false, dt, time);
       return;
@@ -943,8 +943,8 @@ export class OrblyApp implements DemoHost {
       }
     }
     this.menuButtonWasDown = left.menuPressed;
-    this.menu.setOpen(open, anchor, head);
-    this.menu.update(anchor, head, right.tracked ? right.pokeTip : null, dt);
+    this.menu.setOpen(open, anchor, this.head);
+    this.menu.update(anchor, this.head, right.tracked ? right.pokeTip : null, dt);
     // Not an edge: the menu may already be open when step three begins.
     if (open && this.mode === 'tutorial' && this.tutorial.flow.menuOpened()) {
       this.finishTutorial(true);
@@ -1056,7 +1056,7 @@ export class OrblyApp implements DemoHost {
 
   private say(text: string): void {
     const near = this.menu.isOpen ? this.menu.object.position : null;
-    this.toast.show(text, this.head.position, this.head.forward, near);
+    this.toast.show(text, this.head, near);
   }
 
   private updateHand(

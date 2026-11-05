@@ -104,4 +104,8 @@ warning, and undo brings it back.
 start the concert, so there is nothing to learn. Any hand that rises and moves
 ends it within a fraction of a second.
 
+**Narrow views.** Essential UI is designed for the narrowest Meta VR view, and a
+panel follows your palm only as far as your view allows, so a hand held out to
+the side never takes the menu out of sight.
+
 Controllers work but are never required.

@@ -12,7 +12,12 @@ import {
   SphereGeometry,
   Vector3,
 } from '@iwsdk/core';
-import { polarToPosition, Stage, Vec3Like } from '../sequencer/mapping';
+import {
+  BASE_BELOW_HEAD,
+  polarToPosition,
+  Stage,
+  Vec3Like,
+} from '../sequencer/mapping';
 import { GhostHand, GhostPose } from '../visuals/ghost-hand';
 import { lightMaterial } from '../visuals/materials';
 import { Palette } from '../visuals/palettes';
@@ -20,6 +25,7 @@ import { Label } from './label';
 import { OnboardingFlow, TutorialStep } from './onboarding';
 import { StringKey, t } from './strings';
 import { TouchTargets } from './touch';
+import { PALM_SPOT, PINCH_SPOT, SKIP_SPOT } from './tutorial-layout';
 
 const PINCH_LOOP = 2.8;
 const RAISE_LOOP = 3.2;
@@ -144,8 +150,9 @@ export class TutorialView {
     this.time = 0;
     this.object.visible = true;
     this.touch.reset();
-    polarToPosition(-0.75, 0.44, stage, this.skipTarget);
-    this.skipTarget.y = stage.baseY + 0.16;
+    const eyeY = stage.baseY + BASE_BELOW_HEAD;
+    polarToPosition(SKIP_SPOT.azimuth, SKIP_SPOT.radius, stage, this.skipTarget);
+    this.skipTarget.y = eyeY - SKIP_SPOT.drop;
     this.touch.setTargets([this.skipTarget]);
     this.skip.object.position.set(
       this.skipTarget.x,
@@ -247,8 +254,8 @@ export class TutorialView {
 
   private animatePinch(stage: Stage): void {
     const phase = (this.time % PINCH_LOOP) / PINCH_LOOP;
-    polarToPosition(0.25, 0.38, stage, this.goal);
-    this.goal.y = stage.baseY + 0.42;
+    polarToPosition(PINCH_SPOT.azimuth, PINCH_SPOT.radius, stage, this.goal);
+    this.goal.y = stage.baseY + BASE_BELOW_HEAD - PINCH_SPOT.drop;
     const approach = 1 - ramp(phase, 0.02, 0.3);
     this.goal.x += approach * 0.05;
     this.goal.y -= approach * 0.05;
@@ -306,8 +313,8 @@ export class TutorialView {
   private animatePalm(stage: Stage): void {
     const phase = (this.time % PALM_LOOP) / PALM_LOOP;
     const { pose } = this;
-    polarToPosition(-0.5, 0.3, stage, pose.position);
-    pose.position.y = stage.baseY + 0.3;
+    polarToPosition(PALM_SPOT.azimuth, PALM_SPOT.radius, stage, pose.position);
+    pose.position.y = stage.baseY + BASE_BELOW_HEAD - PALM_SPOT.drop;
     polarToPosition(0.35, 1, { ...stage, x: 0, z: 0 }, this.fingers);
     this.fingers.y = 0.12;
     // Rolls about the forearm from palm-down to palm-up.

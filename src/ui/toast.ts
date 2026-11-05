@@ -1,4 +1,5 @@
 import { Vector3 } from '@iwsdk/core';
+import { HeadView, keepInView } from './comfort';
 import { Label } from './label';
 
 const SHOW_SECONDS = 1.7;
@@ -6,6 +7,8 @@ const FADE_SECONDS = 0.25;
 const DISTANCE = 0.62;
 const BELOW_EYES = 0.1;
 const ABOVE_PANEL = 0.17;
+const HALF_WIDTH = 0.26;
+const HALF_HEIGHT = 0.04;
 
 /** A short message that appears in front of the user and fades away. */
 export class Toast {
@@ -29,12 +32,7 @@ export class Toast {
    * @param near an open panel to appear above, so the message never covers
    * what the user is looking at; null places it straight ahead.
    */
-  show(
-    text: string,
-    head: Vector3,
-    forward: Vector3,
-    near: Vector3 | null,
-  ): void {
+  show(text: string, view: HeadView, near: Vector3 | null): void {
     this.label.setText(text);
     this.remaining = SHOW_SECONDS;
     const { object } = this.label;
@@ -42,10 +40,13 @@ export class Toast {
       object.position.copy(near);
       object.position.y += ABOVE_PANEL;
     } else {
-      object.position.copy(head).addScaledVector(forward, DISTANCE);
+      object.position
+        .copy(view.position as Vector3)
+        .addScaledVector(view.forward as Vector3, DISTANCE);
       object.position.y -= BELOW_EYES;
     }
-    object.lookAt(head);
+    keepInView(object.position, view, HALF_WIDTH, HALF_HEIGHT);
+    object.lookAt(view.position as Vector3);
   }
 
   update(dt: number): void {
