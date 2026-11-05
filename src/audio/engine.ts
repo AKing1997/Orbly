@@ -147,10 +147,6 @@ export class AudioEngine {
     setTimeout(() => panner.disconnect(), PANNER_RELEASE_SECONDS * 1000);
   }
 
-  releaseAllOrbs(): void {
-    for (const id of [...this.panners.keys()]) this.releaseOrb(id);
-  }
-
   playOrb(
     id: number,
     midi: number,

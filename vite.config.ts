@@ -41,5 +41,7 @@ export default defineConfig({
     esbuildOptions: { target: 'esnext' },
   },
   publicDir: 'public',
-  base: './',
+  // GitHub Pages serves the site from /<repository>/; the deploy workflow sets
+  // this. Relative paths keep any other static host working unchanged.
+  base: process.env.VITE_BASE ?? './',
 });

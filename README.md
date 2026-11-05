@@ -1,45 +1,105 @@
-# IWSDK App
+# orbly
 
-This project uses `iwsdk.config.json` for declarative scene, asset, component,
-XR, and emulator configuration. Application systems remain explicit in
-`src/index.ts`.
+A spatial music toy for Meta Quest. You sit down and, with nothing but your
+hands, place orbs of light around you. A beam of light sweeps slowly around you
+like the hand of a clock; each orb sings as it passes. In a couple of minutes
+you are sitting inside a loop you made, and your real room pulses with it.
+
+No musical knowledge needed: every position is in key, on the beat.
+
+Built with the [Immersive Web SDK](https://iwsdk.dev) for the Meta VR Start
+Developer Competition 2026 (Entertainment, New Experience). All sound is
+synthesized live with the Web Audio API: there are no samples and no
+third-party music.
+
+## How the music works
+
+| Where you place an orb | What it changes                                    |
+| ---------------------- | -------------------------------------------------- |
+| Angle around you       | When it plays (16 steps, quantized)                |
+| Height                 | Which note (always on a pentatonic scale)          |
+| Near / middle / far    | Which instrument: pluck, pad or bass               |
+
+An orb's colour shows its instrument. It flashes on the note you hear.
+
+## Controls
+
+Hands only, seated, everything within arm's reach. Controllers also work, but
+are never needed.
+
+| Gesture                       | Action                                    |
+| ----------------------------- | ----------------------------------------- |
+| Pinch in empty air            | Create an orb at your fingertips          |
+| Pinch an orb and drag         | Move it (you hear the pitch as it moves)  |
+| Let go of an orb mid-throw    | Delete it                                 |
+| Turn your left palm up        | Open the menu                             |
+| Press a button with the other index finger | Use the menu                 |
+
+The menu holds tempo, play/pause, undo, rotate, colour scene, room/starfield,
+save, clear and home. **Rotate** turns the ring a quarter turn, so the part of
+the loop behind you can be reached without leaving your seat.
+
+With controllers, the trigger pinches and X opens the menu.
+
+## Run it
+
+Requires Node 20.19+, 22.12+ or 24+.
 
 ```sh
 npm install
 npm run dev
 ```
 
-Use the Runtime and Editor controls in the managed browser to switch between
-the running experience and its authored scene.
+This opens a browser running IWER, IWSDK's WebXR emulator, so no headset is
+needed. Click **Enter orbly**, then switch the input to hands in the emulator's
+toolbar. Move a hand with its gizmo and use the **Pinch** control in the hand
+panel. Full controls:
+[IWER guide](https://iwsdk.dev/guides/02-testing-experience.html#iwer-controls).
 
-## Starter content
+```sh
+npm test            # unit tests
+npm run typecheck
+npm run build
+```
 
-The robot and welcome panel are small examples of authored scene content plus
-runtime systems. The robot turns toward the player's head and plays a sound
-when pressed. To remove the robot, delete its scene node, its `RobotSystem`
-registration from `src/index.ts` or `src/index.js`, and its `Robot` registration
-from `src/components.ts` or `src/components.js`; you can then delete the unused
-robot component and system files. To remove the welcome panel, delete its scene
-node and its `PanelSystem` registration from the application entry point.
+## Try it on a Quest
 
-The robot stands on the second of three numbered stations. The first holds dark
-pieces you can grab and move, and the third holds a ring you can spin in place.
-The studio props (the plinths and the dark pieces, plus the floor and stage in VR
-and Desktop 3D) are built in code in `src/scene-assets/studio.scene-asset.ts` or
-`.js`. The VR and Desktop 3D background furniture is built the same way in
-`src/scene-assets/decor.scene-asset.ts` or `.js`, so the starter downloads no
-extra models. To remove any of them, delete their scene nodes and their entries
-in `src/assets.ts` or `src/assets.js`, then delete the files you no longer use.
-The station labels are `public/ui/label-*.uikitml`.
+Open the deployed HTTPS URL in the Meta Quest browser and press **Enter orbly**.
+WebXR needs HTTPS, so for a development build use the network URL printed by
+`npx @iwsdk/cli dev status` and accept the local certificate warning.
 
-The rest of the look is built-in components in the scene, which you can edit in
-the editor without code. The soft light on every object is the scene root's
-`IBLGradient` (select the Level Root to edit it), and the soft shadows under
-each object are `ContactShadow` nodes. In VR and Desktop 3D, the sky is the
-scene root's `DomeGradient` (its colors, tilt and dither are also on the Level
-Root), and the floor fades into it through the `DomeFade` on the floor node. AR
-projects have no sky or floor, so passthrough stays visible, and a
-`ShadowCatcher` node grounds the stations.
+## Demo mode
 
-- Minimal scene walkthrough: https://iwsdk.dev/guides/01b-minimal-scene.html
-- XR-enabled projects — IWER emulator controls: https://iwsdk.dev/guides/02-testing-experience.html#iwer-controls
+`?demo=1` plays a self-running film for recording video. Ghost hands create,
+drag, throw and press buttons through the same code paths as real hands, so what
+you film is the real app. It loops, and takes about two minutes per pass.
+
+- **`/?demo=1` in the emulator** plays in the passthrough room with the emulator
+  UI hidden. Use this one to show mixed reality.
+- **`?demo=1` anywhere else** (or `?demo=1&flat=1`) plays over the starfield.
+
+Press **Start demo** first: browsers only allow sound after a click.
+
+## Deploy
+
+`.github/workflows/deploy.yml` tests, builds and publishes to GitHub Pages on
+every push to `main`. In the repository, set **Settings → Pages → Source** to
+**GitHub Actions**. The workflow sets Vite's `base` from the repository name.
+
+## Layout
+
+```
+src/audio/        Web Audio engine, pentatonic scale, lookahead step clock
+src/sequencer/    Pure radial mapping (position -> step, note, instrument)
+src/interaction/  Pure gesture detection: pinch, grab, throw, palm-up
+src/visuals/      Instanced orbs, beam, floor ring, particles, room pulses
+src/ui/           Palm menu, poke buttons, onboarding, home screen
+src/state/        Composition, undo, persistence, daily challenge
+src/app/          Wires it together; session lifecycle; demo director
+```
+
+`sequencer`, `state` and the detectors in `interaction` have no rendering or
+WebXR dependencies, which is what lets them run under Vitest on simulated joint
+data.
+
+See [docs/quest-testing.md](docs/quest-testing.md) for the on-device checklist.

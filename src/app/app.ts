@@ -119,7 +119,6 @@ export class OrblyApp implements DemoHost {
   private yawTarget = 0;
   private controllerMenuOpen = false;
   private menuButtonWasDown = false;
-  private menuWasOpen = false;
   private readonly demoRequested: boolean;
   /** `&flat=1` films the starfield view even inside the emulator. */
   private readonly demoInXR: boolean;
@@ -300,8 +299,11 @@ export class OrblyApp implements DemoHost {
   private goHome(): void {
     const stage = this.stage;
     if (stage === null) return;
+    if (this.mode === 'tutorial') this.finishTutorial(false);
     this.saveIfChanged();
     this.grabs.forEach((grab) => grab.cancel());
+    this.palm.reset();
+    this.menu.setOpen(false, this.head.position, this.head.position);
     this.store.load(emptyComposition());
     this.saveId = null;
     this.savedRevision = this.store.revision;
@@ -626,6 +628,8 @@ export class OrblyApp implements DemoHost {
     }
     if (this.mode === 'home') {
       this.home.update(this.tips, this.pinchPoints, this.pinchStarts, headPosition, dt);
+      // Keeps fading out a menu that was just used to come here.
+      this.menu.update(headPosition, headPosition, null, dt);
       this.updateHand(left, 0, false, dt, time);
       this.updateHand(right, 1, false, dt, time);
       return;
@@ -665,10 +669,10 @@ export class OrblyApp implements DemoHost {
     this.menuButtonWasDown = left.menuPressed;
     this.menu.setOpen(open, anchor, head);
     this.menu.update(anchor, head, right.tracked ? right.pokeTip : null, dt);
-    if (open && !this.menuWasOpen && this.mode === 'tutorial') {
-      if (this.tutorial.flow.menuOpened()) this.finishTutorial(true);
+    // Not an edge: the menu may already be open when step three begins.
+    if (open && this.mode === 'tutorial' && this.tutorial.flow.menuOpened()) {
+      this.finishTutorial(true);
     }
-    this.menuWasOpen = open;
   }
 
   private onMenuAction(action: MenuAction): void {
