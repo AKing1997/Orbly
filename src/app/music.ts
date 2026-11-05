@@ -2,7 +2,7 @@
 
 import { AudioEngine, OPEN_BRIGHTNESS } from '../audio/engine';
 import { StepClock } from '../audio/clock';
-import { degreeToMidi } from '../audio/scale';
+import { degreeToMidi, SCENE_SCALES } from '../audio/scale';
 import { ConcertArranger } from '../sequencer/concert';
 import { FlashQueue, NO_ORB, NoteEvent, Sequencer } from '../sequencer/player';
 import { stepToAngle, Vec3Like } from '../sequencer/mapping';
@@ -25,7 +25,7 @@ export class Music {
   private arranger: ConcertArranger | null = null;
 
   constructor(
-    store: CompositionStore,
+    private readonly store: CompositionStore,
     isHeld: (orbId: number) => boolean,
   ) {
     this.clock = new StepClock({
@@ -34,6 +34,10 @@ export class Music {
       bpm: store.bpm,
     });
     this.sequencer = new Sequencer(store, isHeld, (note) => this.play(note));
+  }
+
+  private get scale(): readonly number[] {
+    return SCENE_SCALES[this.store.sceneId];
   }
 
   get paused(): boolean {
@@ -102,7 +106,7 @@ export class Music {
     const { audio, clock } = this;
     audio.playOrb(
       orb.id,
-      degreeToMidi(orb.degree, orb.band),
+      degreeToMidi(orb.degree, orb.band, this.scale),
       orb.band,
       audio.currentTime + 0.012,
       clock.stepDuration,
@@ -112,7 +116,7 @@ export class Music {
 
   /** A short, quiet blip of the pitch at `slot` while dragging. */
   preview(slot: Slot): void {
-    this.audio.pitchBlip(degreeToMidi(slot.degree, PREVIEW_BAND));
+    this.audio.pitchBlip(degreeToMidi(slot.degree, PREVIEW_BAND, this.scale));
   }
 
   beamAngle(): number {

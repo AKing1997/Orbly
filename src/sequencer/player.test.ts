@@ -11,6 +11,7 @@ const orbs: OrbData[] = [
 
 const source = {
   orbs,
+  sceneId: 0,
   orbsAtStep(step: number, out: OrbData[]) {
     out.length = 0;
     out.push(...orbs.filter((orb) => orb.step === step));

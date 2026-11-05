@@ -4,7 +4,7 @@
  * without Web Audio.
  */
 
-import { degreeToMidi } from '../audio/scale';
+import { degreeToMidi, SCENE_SCALES } from '../audio/scale';
 import { OrbData } from '../state/composition';
 import { ConcertArranger } from './concert';
 
@@ -21,6 +21,8 @@ export interface NoteEvent {
 
 export interface OrbSource {
   readonly orbs: readonly OrbData[];
+  /** The colour scene, which sets the scale. */
+  readonly sceneId: number;
   orbsAtStep(step: number, out: OrbData[]): OrbData[];
 }
 
@@ -97,7 +99,11 @@ export class Sequencer {
     velocity: number,
   ): void {
     this.event.orbId = orbId;
-    this.event.midi = degreeToMidi(degree, band);
+    this.event.midi = degreeToMidi(
+      degree,
+      band,
+      SCENE_SCALES[this.source.sceneId],
+    );
     this.event.band = band;
     this.event.time = time;
     this.event.velocity = velocity;

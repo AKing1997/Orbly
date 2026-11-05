@@ -10,6 +10,7 @@ import {
   HandJoints,
   Handedness,
   palmNormal,
+  pinchCloseness,
   PalmUpDetector,
   PinchDetector,
   PINCH_OFF_DISTANCE,
@@ -124,6 +125,22 @@ describe('PinchDetector', () => {
     expect(detector.updateButton(true, DT).started).toBe(true);
     expect(detector.updateButton(true, DT).started).toBe(false);
     expect(detector.updateButton(false, DT).ended).toBe(true);
+  });
+});
+
+describe('pinchCloseness', () => {
+  it('stays dark with the fingers apart', () => {
+    expect(pinchCloseness(0.12)).toBe(0);
+    expect(pinchCloseness(null)).toBe(0);
+  });
+
+  it('grows as the fingers close', () => {
+    expect(pinchCloseness(0.04)).toBeGreaterThan(pinchCloseness(0.06));
+  });
+
+  it('is full just as the pinch fires, and stays there', () => {
+    expect(pinchCloseness(PINCH_ON_DISTANCE)).toBe(1);
+    expect(pinchCloseness(0.002)).toBe(1);
   });
 });
 

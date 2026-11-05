@@ -36,6 +36,13 @@ const SHELL_COUNT = MAX_SAVES + 1;
 const LABEL_DISTANCE = 0.8;
 const CHALLENGE_ABOVE_EYES = 0.0;
 const TITLE_ABOVE_EYES = 0.065;
+const PROGRESS_BELOW_EYES = 0.05;
+/** Every finished challenge leaves a bead of light above the labels. */
+const MAX_BEADS = 30;
+const BEAD_ARC = (46 * Math.PI) / 180;
+const BEAD_ABOVE_EYES = 0.12;
+const BEAD_BOW = 0.03;
+const BEAD_SIZE = 0.0095;
 const SPIN_RATE = 0.35;
 const FADE_RATE = 9;
 
@@ -50,11 +57,14 @@ export class HomeScreen {
   private readonly colorAttribute: InstancedBufferAttribute;
   private readonly title = new Label({ lineHeight: 0.026, width: 1400, height: 90, plate: true });
   private readonly challenge = new Label({ lineHeight: 0.036, width: 1500, height: 100, plate: true });
+  private readonly progress = new Label({ lineHeight: 0.027, width: 1500, height: 84, plate: true });
   private readonly plus = new Label({ lineHeight: 0.07, width: 128, height: 128, weight: 300 });
   private readonly touch = new TouchTargets();
   private readonly targets: TouchTarget[] = [];
   private readonly matrix = new Matrix4();
   private readonly center = new Vector3();
+  private readonly beads: Vector3[] = [];
+  private miniCount = 0;
   private saves: readonly SavedComposition[] = [];
   private hovered = -1;
   private spin = 0;
@@ -103,7 +113,7 @@ export class HomeScreen {
     this.shells.frustumCulled = false;
     this.shells.renderOrder = 6;
 
-    const miniCapacity = MAX_SAVES * MAX_ORBS;
+    const miniCapacity = MAX_SAVES * MAX_ORBS + MAX_BEADS;
     const miniGeometry = new SphereGeometry(1, 8, 6);
     this.miniColors = new Float32Array(miniCapacity * 3);
     this.miniEnergy = new Float32Array(miniCapacity).fill(0.25);
@@ -123,6 +133,7 @@ export class HomeScreen {
       this.shells,
       this.title.object,
       this.challenge.object,
+      this.progress.object,
       this.plus.object,
     );
     this.object.visible = false;
@@ -140,6 +151,8 @@ export class HomeScreen {
     saves: readonly SavedComposition[],
     challengeText: string,
     done: boolean,
+    progressText: string,
+    finished: number,
   ): void {
     this.open = true;
     this.stage = stage;
@@ -150,7 +163,8 @@ export class HomeScreen {
       done ? `✓ ${challengeText}` : challengeText,
       done ? '#8dffb0' : '#ffffff',
     );
-    this.layout(stage);
+    this.progress.setText(progressText, '#cfd6ff');
+    this.layout(stage, finished);
   }
 
   hide(): void {
@@ -196,14 +210,16 @@ export class HomeScreen {
     this.shellMaterial.uniforms.uOpacity.value = this.visibility;
     this.title.opacity = this.visibility;
     this.challenge.opacity = this.visibility;
+    this.progress.opacity = this.visibility;
     this.plus.opacity = this.visibility;
     this.title.object.lookAt(head);
     this.challenge.object.lookAt(head);
+    this.progress.object.lookAt(head);
     this.plus.object.lookAt(head);
     this.updateInstances();
   }
 
-  private layout(stage: Stage): void {
+  private layout(stage: Stage, finished: number): void {
     this.targets.length = 0;
     const eyeY = stage.baseY + BASE_BELOW_HEAD;
     const count = this.saves.length + 1;
@@ -227,6 +243,8 @@ export class HomeScreen {
     this.challenge.object.position.y = eyeY + CHALLENGE_ABOVE_EYES;
     polarToPosition(0, LABEL_DISTANCE, stage, this.title.object.position);
     this.title.object.position.y = eyeY + TITLE_ABOVE_EYES;
+    polarToPosition(0, LABEL_DISTANCE, stage, this.progress.object.position);
+    this.progress.object.position.y = eyeY - PROGRESS_BELOW_EYES;
 
     let mini = 0;
     this.saves.forEach((save) => {
@@ -237,8 +255,26 @@ export class HomeScreen {
         mini++;
       }
     });
-    this.minis.count = mini;
+    this.miniCount = mini;
+    this.layoutBeads(stage, eyeY, finished);
+    this.minis.count = mini + this.beads.length;
     this.colorAttribute.needsUpdate = true;
+  }
+
+  /** The record of every day played: it only ever grows. */
+  private layoutBeads(stage: Stage, eyeY: number, finished: number): void {
+    this.beads.length = 0;
+    const count = Math.min(finished, MAX_BEADS);
+    const colors = PALETTES[0].instruments;
+    for (let index = 0; index < count; index++) {
+      // Grows outwards from the middle, so one bead already looks intended.
+      const across = (index - (count - 1) / 2) / MAX_BEADS;
+      const bead = new Vector3();
+      polarToPosition(across * BEAD_ARC, LABEL_DISTANCE, stage, bead);
+      bead.y = eyeY + BEAD_ABOVE_EYES - BEAD_BOW * across * across * 4;
+      this.beads.push(bead);
+      this.miniColors.set(colors[index % 3], (this.miniCount + index) * 3);
+    }
   }
 
   private updateInstances(): void {
@@ -278,6 +314,13 @@ export class HomeScreen {
         mini++;
       }
     });
+    const size = BEAD_SIZE * scale;
+    for (const bead of this.beads) {
+      matrix.makeScale(size, size, size);
+      matrix.setPosition(bead.x, bead.y, bead.z);
+      this.minis.setMatrixAt(mini, matrix);
+      mini++;
+    }
     this.minis.instanceMatrix.needsUpdate = true;
   }
 }

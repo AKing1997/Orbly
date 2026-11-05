@@ -58,4 +58,34 @@ export const PALETTES: readonly Palette[] = [
     skyTop: rgb(0x10261c),
     skyBottom: rgb(0x030a07),
   },
+  {
+    name: 'Night',
+    instruments: [
+      rgb(0x8ea8ff), rgb(0x6a5cff), rgb(0x3fd0ff),
+      rgb(0xc9d6ff), rgb(0x7ff0ff), rgb(0x4a54e0), rgb(0xb6a0ff), rgb(0xe4e8ff),
+    ],
+    beam: rgb(0xbcd0ff),
+    skyTop: rgb(0x080a24),
+    skyBottom: rgb(0x02030c),
+  },
+  {
+    name: 'Mist',
+    instruments: [
+      rgb(0xbff0e4), rgb(0x9ad8d8), rgb(0xd8c8ff),
+      rgb(0xe8fff6), rgb(0xa8e8c8), rgb(0x8fb8c8), rgb(0xf0d8e8), rgb(0xf4fff8),
+    ],
+    beam: rgb(0xd8fff0),
+    skyTop: rgb(0x10242a),
+    skyBottom: rgb(0x040c0e),
+  },
+  {
+    name: 'Storm',
+    instruments: [
+      rgb(0xffb347), rgb(0xb04dff), rgb(0xff4d6d),
+      rgb(0xffe08a), rgb(0xff8a3d), rgb(0x7a2cff), rgb(0xff8fc0), rgb(0xfff0d0),
+    ],
+    beam: rgb(0xffd9a0),
+    skyTop: rgb(0x1e0c2c),
+    skyBottom: rgb(0x08030e),
+  },
 ];

@@ -25,7 +25,8 @@ export const MAX_ORBS = 32;
 export const MIN_BPM = 60;
 export const MAX_BPM = 140;
 export const DEFAULT_BPM = 84;
-export const SCENE_COUNT = 4;
+/** Four colour scenes open from the start, three more moods to unlock. */
+export const SCENE_COUNT = 7;
 const FORMAT_VERSION = 2;
 /** Saves from before orbs could leave the ring still open. */
 const OLDEST_READABLE_VERSION = 1;

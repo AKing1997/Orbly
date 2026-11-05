@@ -5,12 +5,16 @@
  */
 
 import { Composition, deserialize, serialize } from './composition';
+import { streakOf } from './unlocks';
 
 export const MAX_SAVES = 6;
 const KEY_PREFIX = 'orbly.';
 const SAVES_KEY = 'saves';
 const ONBOARDED_KEY = 'onboarded';
 const CHALLENGES_KEY = 'challenges';
+const CHALLENGE_TOTAL_KEY = 'challengeTotal';
+/** Days kept for working out the streak. */
+const KEPT_DAYS = 60;
 
 /** The slice of the Storage interface orbly needs. */
 export interface KeyValueBackend {
@@ -175,8 +179,23 @@ export class Progress {
   markChallengeDone(dateKey: string): void {
     const days = this.completedChallenges();
     if (days.includes(dateKey)) return;
+    const finished = this.challengesFinished;
     days.push(dateKey);
-    this.storage.set(CHALLENGES_KEY, JSON.stringify(days.slice(-60)));
+    this.storage.set(CHALLENGES_KEY, JSON.stringify(days.slice(-KEPT_DAYS)));
+    this.storage.set(CHALLENGE_TOTAL_KEY, String(finished + 1));
+  }
+
+  /** Every challenge ever finished. Unlocks are earned for good. */
+  get challengesFinished(): number {
+    const total = Number(this.storage.get(CHALLENGE_TOTAL_KEY));
+    return Math.max(
+      Number.isFinite(total) ? total : 0,
+      this.completedChallenges().length,
+    );
+  }
+
+  streak(today: string): number {
+    return streakOf(this.completedChallenges(), today);
   }
 
   private completedChallenges(): string[] {

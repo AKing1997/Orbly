@@ -30,6 +30,7 @@ juntos: es el ajuste con más probabilidades de hacer falta.
 
 - [ ] Pellizco: 10 de 10 aciertos, sentado, con buena luz.
 - [ ] Con las manos en reposo en el regazo no aparecen orbes.
+- [ ] El destello entre los dedos anticipa el pellizco sin molestar (`MAX_SIZE` en `src/visuals/pinch-spark.ts`).
 - [ ] Arrastrar no suelta el orbe a mitad de camino.
 - [ ] Lanzar pega el orbe a la superficie, y soltar con calma no lo lanza (`THROW_SPEED` en `src/interaction/grab.ts`).
 - [ ] El orbe cae donde apuntabas. Si no, ajusta `AIM_ASSIST` en `src/room/throw.ts`.
@@ -109,7 +110,14 @@ Tampoco se ha escuchado nunca: es lo primero que debes oír.
 - [ ] Con un solo orbe, ya suena a pieza completa.
 - [ ] Sin cortes de audio en pleno concierto con muchos orbes.
 
-## 9. Campo de visión
+## 9. Volver cada día
+
+- [ ] Al cumplir el reto, la canción cambia de ambiente y se nota que es una recompensa.
+- [ ] Escucha los tres ambientes nuevos: ninguno debe sonar raro con tu canción.
+- [ ] El botón de escena recorre solo los ambientes abiertos.
+- [ ] Mañana, el reto es otro, la cuenta de luz sigue en Inicio y la racha suma.
+
+## 10. Campo de visión
 
 Comprobado con el perfil de las VR Glasses del emulador. En el visor, confirma
 la sensación.
@@ -119,7 +127,7 @@ la sensación.
 - [ ] Con la mano izquierda muy a un lado, el menú sigue a la vista.
 - [ ] Al mirar el menú, no se mueve mientras acercas el dedo.
 
-## 10. Pausa y reanudación
+## 11. Pausa y reanudación
 
 - [ ] El menú del sistema pausa el sonido y el haz.
 - [ ] Al volver, todo sigue donde estaba, sin ráfagas de notas.
@@ -127,7 +135,7 @@ la sensación.
 - [ ] Salir y volver a entrar conserva el bucle.
 - [ ] Cerrar el navegador y reabrirlo muestra los guardados en Inicio.
 
-## 11. Primera experiencia
+## 12. Primera experiencia
 
 Dásela a alguien que no la conozca y no le expliques nada.
 

@@ -50,6 +50,17 @@ const PINCH_OFF_DWELL = 0.06;
 /** How long tracking may drop out before a held pinch lets go. */
 const PINCH_LOST_GRACE = 0.2;
 
+/** Thumb-to-index distance where a pinch starts to be felt coming. */
+const PINCH_FELT_DISTANCE = 0.075;
+
+/** How close to a pinch the fingers are: 0 well apart, 1 about to touch. */
+export function pinchCloseness(gap: number | null): number {
+  if (gap === null) return 0;
+  const span = PINCH_FELT_DISTANCE - PINCH_ON_DISTANCE;
+  const closed = (PINCH_FELT_DISTANCE - gap) / span;
+  return Math.max(0, Math.min(1, closed));
+}
+
 export interface PinchEdges {
   active: boolean;
   started: boolean;

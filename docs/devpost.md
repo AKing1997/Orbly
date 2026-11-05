@@ -34,8 +34,8 @@ pulse grow around your song, sections rise and ebb, and the melody draws itself
 across the dark room. Raise a hand and it is yours again.
 
 Your room remembers. Come back tomorrow and your song is still on your walls.
-Open it somewhere else and it lands on that room's surfaces instead, as a
-different band.
+Open it elsewhere and it lands on that room's surfaces, as a different band.
+Daily challenges unlock new moods, each with its own scale.
 
 ### How I built it
 
@@ -53,7 +53,7 @@ simulated hands and rooms.
 
 I built orbly without a headset. [Update once tested on device.] The IWER
 emulator provided scripted, anatomically shaped hands and a detected room, so
-gestures were tested end to end rather than by eye.
+gestures were tested end to end.
 
 Hands were the hard part. The point between your fingers jumps the moment they
 open, which bent every throw upward and dropped orbs a note too high. Measuring
@@ -63,7 +63,7 @@ also pointing at a wall, so calling an orb back had to become deliberate.
 ### What I learned
 
 Polish in a hands-only experience is forgiveness: hysteresis, a slight aim assist
-towards your gaze, and a hand resting on your lap that never does anything.
+towards your gaze, and resting hands that never do anything.
 
 ### What's next
 
@@ -79,8 +79,9 @@ start and 3.6 cm to end, plus a short dwell. Noise cannot flicker it, and a brie
 tracking loss does not drop what you hold. Pinches below lap height are ignored,
 so resting hands stay quiet.
 
-**Create and move.** A pinch within 7.5 cm of an orb grabs it; anywhere else
-creates one. Orbs glow as a finger approaches. When you let go, the orb stays
+**Create and move.** A spark grows between your fingers as they close, standing
+in for the haptics hands do not have. A pinch within 7.5 cm of an orb grabs it;
+anywhere else creates one. Orbs glow as a finger approaches. When you let go, the orb stays
 where it was as your fingers began to part, not where they ended up.
 
 **Throw** uses the hand's speed over the last 100 ms, measured at a knuckle as

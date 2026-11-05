@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEGREE_COUNT } from '../sequencer/mapping';
+import { SCENE_COUNT } from '../state/composition';
 import {
   BAND_ROOT_MIDI,
   degreeToMidi,
@@ -7,11 +8,12 @@ import {
   isInScale,
   midiToFrequency,
   quantizeSemitones,
+  SCENE_SCALES,
 } from './scale';
 
 describe('degreeToSemitones', () => {
   it('walks the major pentatonic and repeats by octave', () => {
-    const notes = [0, 1, 2, 3, 4, 5, 6].map(degreeToSemitones);
+    const notes = [0, 1, 2, 3, 4, 5, 6].map((degree) => degreeToSemitones(degree));
     expect(notes).toEqual([0, 2, 4, 7, 9, 12, 14]);
   });
 
@@ -39,6 +41,39 @@ describe('every reachable note', () => {
       expect(degreeToMidi(degree, 0)).toBeGreaterThan(
         degreeToMidi(degree - 1, 0),
       );
+    }
+  });
+});
+
+describe('moods', () => {
+  it('keeps the first scenes on the same scale, so colour alone changes nothing', () => {
+    for (const scale of SCENE_SCALES.slice(0, 4)) expect(scale).toBe(SCENE_SCALES[0]);
+  });
+
+  it('gives each unlockable mood a scale of its own', () => {
+    expect(new Set(SCENE_SCALES.slice(3)).size).toBe(4);
+  });
+
+  it('has a scene colour for every scale', () => {
+    expect(SCENE_SCALES).toHaveLength(SCENE_COUNT);
+  });
+
+  it('can never clash: no mood holds two notes a semitone apart', () => {
+    for (const scale of SCENE_SCALES) {
+      const notes = [...scale, 12];
+      for (let i = 1; i < notes.length; i++) {
+        expect(notes[i] - notes[i - 1]).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+
+  it('keeps pitch rising with height in every mood', () => {
+    for (const scale of SCENE_SCALES) {
+      for (let degree = 1; degree < DEGREE_COUNT; degree++) {
+        expect(degreeToMidi(degree, 0, scale)).toBeGreaterThan(
+          degreeToMidi(degree - 1, 0, scale),
+        );
+      }
     }
   });
 });

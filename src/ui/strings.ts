@@ -26,6 +26,11 @@ const STRINGS = {
     challengeDone: 'Challenge complete!',
     roomRemembered: 'Your room remembered your song',
     concertHint: 'Raise a hand to play again',
+    newMood: 'New mood: {name}',
+    streak: '{n}-day streak',
+    nextMood: 'Next mood, {name}: {n} challenges to go',
+    nextMoodOne: 'Next mood, {name}: 1 challenge to go',
+    allMoods: 'All moods open',
     paused: 'Paused',
   },
   es: {
@@ -51,6 +56,11 @@ const STRINGS = {
     challengeDone: '¡Reto completado!',
     roomRemembered: 'Tu habitación recordó tu canción',
     concertHint: 'Levanta una mano para volver a tocar',
+    newMood: 'Nuevo ambiente: {name}',
+    streak: 'Racha de {n} días',
+    nextMood: 'Próximo ambiente, {name}: faltan {n} retos',
+    nextMoodOne: 'Próximo ambiente, {name}: falta 1 reto',
+    allMoods: 'Todos los ambientes abiertos',
     paused: 'En pausa',
   },
 } as const;
@@ -62,6 +72,13 @@ export const locale: Locale =
     ? 'es'
     : 'en';
 
-export function t(key: StringKey): string {
-  return STRINGS[locale][key];
+export function t(
+  key: StringKey,
+  values: Record<string, string | number> = {},
+): string {
+  let text: string = STRINGS[locale][key];
+  for (const [name, value] of Object.entries(values)) {
+    text = text.replace(`{${name}}`, String(value));
+  }
+  return text;
 }

@@ -14,6 +14,7 @@ import {
   ListeningDetector,
   ListeningHand,
   PalmUpDetector,
+  pinchCloseness,
   PinchDetector,
   PinchEdges,
 } from '../interaction/gestures';
@@ -46,6 +47,7 @@ import {
 import { challengeFor, dateKey } from '../state/challenge';
 import { emptyComposition, MAX_ORBS, OrbData } from '../state/composition';
 import { browserStorage, Library, Progress } from '../state/storage';
+import { nextScene, nextUnlock, sceneUnlockedAt } from '../state/unlocks';
 import { CompositionStore, StoreEvent } from '../state/store';
 import { HomeScreen } from '../ui/home';
 import { EntryOverlay } from '../ui/overlay';
@@ -58,6 +60,7 @@ import { Beam } from '../visuals/beam';
 import { OrbField } from '../visuals/orbs';
 import { Palette, PALETTES } from '../visuals/palettes';
 import { Particles } from '../visuals/particles';
+import { PinchSparks } from '../visuals/pinch-spark';
 import { FloorRing } from '../visuals/ring';
 import { RoomPulse } from '../visuals/room';
 import { Tether } from '../visuals/tether';
@@ -137,6 +140,7 @@ export class OrblyApp implements DemoHost {
   private readonly room = new RoomPulse();
   private readonly tethers = [new Tether(), new Tether()];
   private readonly veil = new RoomVeil();
+  private readonly sparks = new PinchSparks();
   private readonly listening = new ListeningDetector();
   private readonly listeningHands: ListeningHand[] = [
     { position: null, pinching: false },
@@ -189,6 +193,7 @@ export class OrblyApp implements DemoHost {
   private readonly freshOrbs = new Set<number>();
   private readonly dropSlot: Slot = { step: 0, degree: 0, band: 0 };
   private readonly dragSlot: Slot = { step: -1, degree: -1, band: -1 };
+  private readonly sparkSlot: Slot = { step: 0, degree: 0, band: 0 };
   private readonly hoverIds = [-1, -1];
   private palette: Palette = PALETTES[0];
   private inSession = false;
@@ -237,6 +242,7 @@ export class OrblyApp implements DemoHost {
       this.beam.object,
       this.orbs.object,
       this.particles.object,
+      this.sparks.object,
       this.tethers[0].object,
       this.tethers[1].object,
       this.menu.object,
@@ -314,6 +320,7 @@ export class OrblyApp implements DemoHost {
     this.readPinches(delta);
     this.updateMode(delta, time);
     this.updateTethers();
+    this.updateSparks(stage, delta);
     this.updateRoomMemory(stage, delta);
     this.updateConcert(stage, delta);
 
@@ -521,7 +528,26 @@ export class OrblyApp implements DemoHost {
       this.library.list(),
       this.challenge.text[locale],
       this.progress.challengeDone(this.challengeKey),
+      this.progressLine(),
+      this.progress.challengesFinished,
     );
+  }
+
+  /** What has been earned, and what is next to work towards. */
+  private progressLine(): string {
+    const parts: string[] = [];
+    const streak = this.progress.streak(this.challengeKey);
+    if (streak > 1) parts.push(t('streak', { n: streak }));
+    const next = nextUnlock(this.progress.challengesFinished);
+    parts.push(
+      next === null
+        ? t('allMoods')
+        : t(next.remaining === 1 ? 'nextMoodOne' : 'nextMood', {
+          name: PALETTES[next.sceneId].name,
+          n: next.remaining,
+        }),
+    );
+    return parts.join('  ·  ');
   }
 
   private openFromHome(saveIndex: number): void {
@@ -570,8 +596,15 @@ export class OrblyApp implements DemoHost {
     if (!this.challenge.isMet(this.store.snapshot())) return;
     this.progress.markChallengeDone(this.challengeKey);
     this.updateGoal();
-    this.say(t('challengeDone'));
     this.celebrate();
+    const unlocked = sceneUnlockedAt(this.progress.challengesFinished);
+    if (unlocked === null) {
+      this.say(t('challengeDone'));
+    } else {
+      // The reward is heard at once: the song itself takes on the new mood.
+      this.store.setScene(unlocked);
+      this.say(t('newMood', { name: this.palette.name }));
+    }
   }
 
   /** A ring of sparks around the user and a rising chord. */
@@ -972,7 +1005,9 @@ export class OrblyApp implements DemoHost {
         audio.ui(this.store.rotateRing(RING_TURN_STEPS) ? 'whoosh' : 'error');
         break;
       case 'scene':
-        this.store.setScene(this.store.sceneId + 1);
+        this.store.setScene(
+          nextScene(this.store.sceneId, this.progress.challengesFinished),
+        );
         this.say(this.palette.name);
         break;
       case 'clear':
@@ -1087,6 +1122,26 @@ export class OrblyApp implements DemoHost {
     );
   }
 
+  /** Lets each hand feel a pinch arrive, in the colour of the orb it would make. */
+  private updateSparks(stage: Stage, dt: number): void {
+    for (let index = 0; index < 2; index++) {
+      const hand = index === 0 ? this.hands.left : this.hands.right;
+      const busy = this.grabs[index].held >= 0 || this.menu.isOpen ||
+        this.pinches[index].isActive;
+      const ready = (this.mode === 'play' || this.mode === 'tutorial') && !busy &&
+        canCreateAt(hand.pinchPoint, stage);
+      const closeness = ready ? pinchCloseness(hand.pinchGap) : 0;
+      const { band } = positionToSlot(hand.pinchPoint, stage, this.sparkSlot);
+      this.sparks.set(
+        index,
+        hand.pinchPoint,
+        closeness,
+        this.palette.instruments[band],
+        dt,
+      );
+    }
+  }
+
   /** Shows which far orb a pinch would call back, while a hand points at it. */
   private updateTethers(): void {
     for (let index = 0; index < 2; index++) {
@@ -1145,6 +1200,11 @@ export class OrblyApp implements DemoHost {
     this.orbs.setHeld(id, true);
     this.dragSlot.step = -1;
     this.dragStartDegree = this.store.find(id)?.degree ?? 0;
+    // Taking hold of something should register, with or without haptics.
+    if (!this.freshOrbs.has(id)) {
+      this.orbs.pulse(id, 0.55);
+      this.music.audio.ui('tick');
+    }
     this.pulseHaptics(this.grabs[0].held === id ? 0 : 1, 0.5, 20);
   }
 

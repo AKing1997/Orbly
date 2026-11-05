@@ -39,6 +39,11 @@ a soft pulse appear around it, layers enter and leave in sections, and the melod
 draws itself across the dark room. Even a single orb becomes music. Your song
 itself never changes, and raising a hand brings it straight back.
 
+**A reason to come back.** A new challenge every day. Each one you finish leaves
+a bead of light on the home screen and works towards new moods, each with its own
+colours and its own scale. The first arrives with your first challenge, and your
+song takes it on at once.
+
 **Your room remembers your song.** The first orb to land pins the song to a
 persistent anchor. Come back to the same room and it is already on your walls,
 exactly where you left it, wherever you sit. Open it in another room and the
