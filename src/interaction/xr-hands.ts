@@ -78,7 +78,9 @@ export class XRHandReader {
   read(frame: XRFrame, session: XRSession, space: XRReferenceSpace): void {
     this.left.reset();
     this.right.reset();
-    for (const source of session.inputSources) {
+    const sources = session.inputSources;
+    for (let i = 0; i < sources.length; i++) {
+      const source = sources[i];
       if (source.handedness === 'none') continue;
       const state = source.handedness === 'left' ? this.left : this.right;
       // A hand always wins over a controller listed for the same side.

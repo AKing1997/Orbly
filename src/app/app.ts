@@ -1,6 +1,14 @@
 /** Wires input, state, sound and visuals together, once per frame. */
 
-import { Group, Vector3, World } from '@iwsdk/core';
+import {
+  Group,
+  MathUtils,
+  Matrix4,
+  Quaternion,
+  SessionMode,
+  Vector3,
+  World,
+} from '@iwsdk/core';
 import { PalmUpDetector, PinchDetector, PinchEdges } from '../interaction/gestures';
 import { GrabController, OrbHost } from '../interaction/grab';
 import { HandState, XRHandReader } from '../interaction/xr-hands';
@@ -32,11 +40,31 @@ import { Palette, PALETTES } from '../visuals/palettes';
 import { Particles } from '../visuals/particles';
 import { FloorRing } from '../visuals/ring';
 import { RoomPulse } from '../visuals/room';
+import { DemoDirector, DemoHost } from './demo';
 import { BEAT_FLASH, Music } from './music';
 import { SessionLifecycle } from './session';
 import { HeadPose } from './stage-pose';
 
-type Mode = 'idle' | 'home' | 'tutorial' | 'play';
+type Mode = 'idle' | 'home' | 'tutorial' | 'play' | 'demo';
+
+interface EmulatedDevice {
+  /** 'programmatic' hands the camera to the page and hides the emulator UI. */
+  controlMode: 'manual' | 'programmatic';
+  position: { set(x: number, y: number, z: number): void };
+  quaternion: { set(x: number, y: number, z: number, w: number): void };
+  hands: Record<'left' | 'right', { connected: boolean }>;
+  controllers: Record<'left' | 'right', { connected: boolean }>;
+  devui?: { devUIContainer?: HTMLElement };
+}
+
+/** Present only in the IWER emulator, never in a production build. */
+function emulator(): EmulatedDevice | null {
+  const scope = globalThis as unknown as { IWER_DEVICE?: EmulatedDevice };
+  return scope.IWER_DEVICE ?? null;
+}
+
+const DEMO_EYE_HEIGHT = 1.22;
+const TARGET_FRAME_RATE = 72;
 
 const MAX_DT = 0.1;
 const CELEBRATION_CHORD = [72, 76, 79, 84];
@@ -46,8 +74,9 @@ const QUARTER_TURN = Math.PI / 2;
 const ROTATE_RATE = 5;
 const XR_PIXELS_PER_UNIT = 820;
 const XR_STAR_SCALE = 2;
+const SESSION_START_TIMEOUT = 12000;
 
-export class OrblyApp implements OrbHost {
+export class OrblyApp implements DemoHost {
   readonly store = new CompositionStore();
   readonly root = new Group();
   readonly head: HeadPose;
@@ -83,12 +112,20 @@ export class OrblyApp implements OrbHost {
   private readonly hoverIds = [-1, -1];
   private palette: Palette = PALETTES[0];
   private inSession = false;
+  private sessionMode = SessionMode.ImmersiveAR;
+  private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private level = 0;
   private beat = 0;
   private yawTarget = 0;
   private controllerMenuOpen = false;
   private menuButtonWasDown = false;
   private menuWasOpen = false;
+  private readonly demoRequested: boolean;
+  /** `&flat=1` films the starfield view even inside the emulator. */
+  private readonly demoInXR: boolean;
+  private demo: DemoDirector | null = null;
+  private readonly lookScratch = new Matrix4();
+  private readonly lookQuaternion = new Quaternion();
   private readonly edges: PinchEdges[] = [];
   private readonly tips: (Vec3Like | null)[] = [null, null];
   private readonly pinchPoints: Vec3Like[];
@@ -141,12 +178,36 @@ export class OrblyApp implements OrbHost {
 
     this.store.subscribe((event) => this.onStoreEvent(event));
 
+    const query = new URLSearchParams(location.search);
+    this.demoRequested = query.get('demo') === '1';
+    this.demoInXR = emulator() !== null && query.get('flat') !== '1';
     this.overlay = new EntryOverlay(() => this.enter());
-    this.overlay.show('ready');
+    this.showEntry();
     new SessionLifecycle(world, {
       onStart: () => this.onSessionStart(),
       onEnd: () => this.onSessionEnd(),
       onActiveChange: (active) => this.onActiveChange(active),
+    });
+  }
+
+  /** Offers the right start for this device. */
+  private showEntry(): void {
+    if (this.demoRequested) {
+      this.overlay.show('demo');
+      return;
+    }
+    this.overlay.show('loading');
+    const xr = navigator.xr;
+    if (xr === undefined) {
+      this.overlay.show('unsupported');
+      return;
+    }
+    Promise.all([
+      xr.isSessionSupported('immersive-ar').catch(() => false),
+      xr.isSessionSupported('immersive-vr').catch(() => false),
+    ]).then(([ar, vr]) => {
+      this.sessionMode = ar ? SessionMode.ImmersiveAR : SessionMode.ImmersiveVR;
+      this.overlay.show(ar || vr ? 'ready' : 'unsupported');
     });
   }
 
@@ -173,7 +234,9 @@ export class OrblyApp implements OrbHost {
 
     this.music.clock.tick();
     this.music.drainFlashes((id) => this.flash(id));
-    this.music.setListener(this.head.position, this.head.forward, this.head.up);
+    if (this.mode !== 'demo') {
+      this.music.setListener(this.head.position, this.head.forward, this.head.up);
+    }
 
     const target = this.mode === 'home' ? 0.15 : this.music.paused ? 0.35 : 1;
     this.level += (target - this.level) * (1 - Math.exp(-delta * 3));
@@ -318,17 +381,84 @@ export class OrblyApp implements OrbHost {
 
   private enter(): void {
     this.music.unlock();
-    this.world.launchXR();
+    if (this.demoRequested && !this.demoInXR) {
+      this.overlay.hide();
+      this.startDemo();
+      return;
+    }
+    const failed = this.sessionFailed;
+    this.sessionTimer = setTimeout(failed, SESSION_START_TIMEOUT);
+    this.world.launchXR({ sessionMode: this.sessionMode });
+  }
+
+  /** The headset refused or never answered: let the user try again. */
+  private readonly sessionFailed = (): void => {
+    if (this.inSession) return;
+    this.overlay.showError();
+  };
+
+  private startDemo(): void {
+    const { fov } = this.world.camera;
+    this.stage = makeStage(
+      { x: 0, y: DEMO_EYE_HEIGHT, z: 0 },
+      0,
+      0,
+    );
+    this.yawTarget = 0;
+    this.beam.setStage(this.stage);
+    this.ring.setStage(this.stage);
+    this.root.visible = true;
+    if (!this.inSession) {
+      const height = this.world.renderer.domElement.height;
+      this.particles.setPixelsPerUnit(
+        height / (2 * Math.tan(MathUtils.degToRad(fov) / 2)),
+      );
+      this.setBackdrop(true);
+    }
+    this.mode = 'demo';
+    this.music.run();
+    this.demo = new DemoDirector(
+      this,
+      this.stage,
+      this.root,
+      () => this.palette.beam,
+    );
   }
 
   private onSessionStart(): void {
     this.inSession = true;
+    if (this.sessionTimer !== null) clearTimeout(this.sessionTimer);
     this.overlay.hide();
     this.music.unlock();
     this.particles.setPixelsPerUnit(XR_PIXELS_PER_UNIT);
     this.backdrop.setPointScale(XR_STAR_SCALE);
+    this.setBackdrop(this.sessionMode === SessionMode.ImmersiveVR);
     const session = this.world.session;
     session?.addEventListener('selectstart', this.onSelect);
+    this.tuneForHeadset(session);
+    if (this.demoRequested) {
+      const device = emulator();
+      if (device !== null) {
+        device.controlMode = 'programmatic';
+        device.devui?.devUIContainer?.style.setProperty('display', 'none');
+        for (const side of ['left', 'right'] as const) {
+          device.hands[side].connected = false;
+          device.controllers[side].connected = false;
+        }
+      }
+      this.startDemo();
+    }
+  }
+
+  /** Spends less per frame on what orbly does not use. */
+  private tuneForHeadset(session: XRSession | undefined): void {
+    this.world.renderer.xr.setFoveation(1);
+    session?.updateTargetFrameRate?.(TARGET_FRAME_RATE)?.catch(() => undefined);
+    const { multiPointers } = this.world.input.xr;
+    for (const pointer of [multiPointers.left, multiPointers.right]) {
+      pointer.toggleSubPointer('ray', false);
+      pointer.toggleSubPointer('touch', false);
+    }
   }
 
   /** A pinch counts as a user gesture, in case audio is still locked. */
@@ -346,11 +476,12 @@ export class OrblyApp implements OrbHost {
     this.tutorial.stop();
     this.home.hide();
     this.mode = 'idle';
+    this.demo = null;
     this.music.halt();
     this.room.clear();
     this.stage = null;
     this.root.visible = false;
-    this.overlay.show('ready');
+    this.showEntry();
   }
 
   private onActiveChange(active: boolean): void {
@@ -489,6 +620,10 @@ export class OrblyApp implements OrbHost {
   private updateMode(dt: number, time: number): void {
     const { left, right } = this.hands;
     const headPosition = this.head.position;
+    if (this.demo !== null) {
+      this.demo.update(dt);
+      return;
+    }
     if (this.mode === 'home') {
       this.home.update(this.tips, this.pinchPoints, this.pinchStarts, headPosition, dt);
       this.updateHand(left, 0, false, dt, time);
@@ -592,6 +727,49 @@ export class OrblyApp implements OrbHost {
     this.backdrop.enabled = starfield;
     this.room.object.visible = !starfield;
     this.menu.setBackdrop(starfield);
+  }
+
+  // DemoHost --------------------------------------------------------------
+
+  addOrb(slot: Slot): void {
+    this.store.add(slot);
+    this.relocateOrbs();
+  }
+
+  clearAll(): void {
+    this.store.load({ ...emptyComposition(), sceneId: this.store.sceneId });
+  }
+
+  menuAction(action: MenuAction): void {
+    this.onMenuAction(action);
+  }
+
+  setStarfield(on: boolean): void {
+    this.setBackdrop(on || !this.inSession);
+  }
+
+  orbAt(slot: Slot): number {
+    const orb = this.store.orbs.find(
+      (other) =>
+        other.step === slot.step && other.degree === slot.degree &&
+        other.band === slot.band,
+    );
+    return orb?.id ?? -1;
+  }
+
+  setCamera(position: Vector3, target: Vector3): void {
+    const { camera } = this.world;
+    const device = emulator();
+    if (device !== null && this.inSession) {
+      this.lookScratch.lookAt(position, target, camera.up);
+      this.lookQuaternion.setFromRotationMatrix(this.lookScratch);
+      const q = this.lookQuaternion;
+      device.position.set(position.x, position.y, position.z);
+      device.quaternion.set(q.x, q.y, q.z, q.w);
+    } else {
+      camera.position.copy(position);
+      camera.lookAt(target);
+    }
   }
 
   private say(text: string): void {

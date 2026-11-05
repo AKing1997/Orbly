@@ -260,6 +260,12 @@ export class PalmMenu {
     this.setIcon(this.indexOf('backdrop'), starfield ? 'room' : 'stars');
   }
 
+  /** World position of a button's centre. */
+  buttonPosition(action: MenuAction, out: Vector3): Vector3 {
+    const rect = buttonRect(BUTTONS[this.indexOf(action)]);
+    return this.object.localToWorld(out.set(rect.x, rect.y, 0));
+  }
+
   setOpen(open: boolean, palm: Vec3Like, head: Vec3Like): void {
     if (open === this.open) return;
     this.open = open;

@@ -55,8 +55,8 @@ export interface GhostPose {
   quaternion: Quaternion;
   /** 0 is a relaxed open hand, 1 is thumb and index touching. */
   pinch: number;
-  /** Extra curl on all fingers, 0 to 1. */
-  curl?: number;
+  /** Folds everything but the index, 0 to 1: the pointing pose. */
+  fold?: number;
 }
 
 export class GhostHand {
@@ -73,6 +73,8 @@ export class GhostHand {
   private readonly scale = new Vector3();
   private readonly mirror: number;
   private readonly world = new Vector3();
+  private readonly from = new Vector3();
+  private readonly to = new Vector3();
 
   constructor(handedness: 'left' | 'right') {
     this.mirror = handedness === 'left' ? -1 : 1;
@@ -156,15 +158,13 @@ export class GhostHand {
 
   /** Where the thumb and index tips meet, in world space. */
   pinchPoint(pose: GhostPose, out: Vector3): Vector3 {
-    this.solve(pose.pinch, pose.curl ?? 0);
+    this.solve(pose.pinch, pose.fold ?? 0);
     return this.toWorld(this.joints[4], pose, out);
   }
 
   apply(pose: GhostPose): void {
-    this.solve(pose.pinch, pose.curl ?? 0);
-    const { mid, direction, rotation, scale, matrix } = this;
-    const from = new Vector3();
-    const to = new Vector3();
+    this.solve(pose.pinch, pose.fold ?? 0);
+    const { mid, direction, rotation, scale, matrix, from, to } = this;
     this.segments.forEach(([start, end, radius], index) => {
       this.toWorld(this.joints[start], pose, from);
       this.toWorld(this.joints[end], pose, to);
@@ -187,7 +187,7 @@ export class GhostHand {
       .add(pose.position);
   }
 
-  private solve(pinch: number, curl: number): void {
+  private solve(pinch: number, fold: number): void {
     const { joints } = this;
     joints[0].set(0, 0, 0);
     FINGERS.forEach((finger, index) => {
@@ -200,7 +200,7 @@ export class GhostHand {
         const pinchCurl = index === 0
           ? INDEX_PINCH[joint] * pinch
           : (0.02 + joint * 0.05) * pinch;
-        bend += pinchCurl + curl * 0.95 + 0.06;
+        bend += pinchCurl + (index === 0 ? 0 : fold * 1.05) + 0.06;
         const horizontal = Math.cos(bend) * finger.lengths[joint];
         joints[first + joint + 1].set(
           joints[first + joint].x + splayX * horizontal,
@@ -226,6 +226,7 @@ export class GhostHand {
     for (let joint = 0; joint < 3; joint++) {
       const fraction = fractions[joint];
       const bulge = Math.sin(fraction * Math.PI) * 0.018;
+      this.openThumb[joint].lerp(joints[9], fold * 0.7);
       joints[THUMB_START + joint + 1]
         .copy(this.openThumb[joint])
         .lerp(

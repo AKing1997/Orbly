@@ -126,7 +126,9 @@ export class OrbField {
   onFlingEnd: ((x: number, y: number, z: number, band: number) => void) | null =
     null;
 
-  private readonly views = new Map<number, OrbView>();
+  /** Live views in draw order; `byId` finds one without searching. */
+  private readonly list: OrbView[] = [];
+  private readonly byId = new Map<number, OrbView>();
   private readonly cores: InstancedMesh;
   private readonly halos: InstancedMesh;
   private readonly colors: Float32Array;
@@ -162,11 +164,11 @@ export class OrbField {
   }
 
   get size(): number {
-    return this.views.size;
+    return this.list.length;
   }
 
   has(id: number): boolean {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     return view !== undefined && view.leaving === 0;
   }
 
@@ -176,7 +178,7 @@ export class OrbField {
 
   spawn(id: number, band: number, position: Vec3Like): void {
     const [r, g, b] = this.palette.instruments[band];
-    this.views.set(id, {
+    const view: OrbView = {
       id,
       band,
       x: position.x,
@@ -198,12 +200,14 @@ export class OrbField {
       leaving: 0,
       leavingTotal: 1,
       flying: false,
-    });
+    };
+    this.list.push(view);
+    this.byId.set(id, view);
   }
 
   /** Eases the orb towards a resting position. */
   moveTo(id: number, position: Vec3Like): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view === undefined) return;
     view.targetX = position.x;
     view.targetY = position.y;
@@ -212,7 +216,7 @@ export class OrbField {
 
   /** Pins the orb to a point, as while it is being dragged. */
   place(id: number, position: Vec3Like): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view === undefined) return;
     view.x = view.targetX = position.x;
     view.y = view.targetY = position.y;
@@ -220,30 +224,30 @@ export class OrbField {
   }
 
   setBand(id: number, band: number): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view !== undefined) view.band = band;
   }
 
   setHeld(id: number, held: boolean): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view === undefined) return;
     view.held = held;
     view.targetScale = held ? 1.2 : 1;
   }
 
   setHover(id: number, hovered: boolean): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view !== undefined) view.hoverTarget = hovered ? 1 : 0;
   }
 
   pulse(id: number, amount = 1): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view !== undefined) view.pulse = Math.max(view.pulse, amount);
   }
 
   /** Sends the orb flying and fading, then removes it. */
   fling(id: number, velocity: Vec3Like): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view === undefined || view.leaving > 0) return;
     view.flying = true;
     view.velocityX = velocity.x * 0.9;
@@ -256,7 +260,7 @@ export class OrbField {
 
   /** Shrinks the orb away in place, then removes it. */
   dissolve(id: number): void {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view === undefined || view.leaving > 0) return;
     view.leaving = DISSOLVE_SECONDS;
     view.leavingTotal = DISSOLVE_SECONDS;
@@ -266,7 +270,8 @@ export class OrbField {
   nearest(point: Vec3Like, radius: number): number {
     let best = -1;
     let bestDistance = radius;
-    for (const view of this.views.values()) {
+    for (let i = 0; i < this.list.length; i++) {
+      const view = this.list[i];
       if (view.leaving > 0) continue;
       const distance = Math.hypot(
         view.x - point.x,
@@ -282,7 +287,7 @@ export class OrbField {
   }
 
   getPosition<T extends Vec3Like>(id: number, out: T): T | null {
-    const view = this.views.get(id);
+    const view = this.byId.get(id);
     if (view === undefined) return null;
     out.x = view.x;
     out.y = view.y;
@@ -293,8 +298,8 @@ export class OrbField {
   /** Living orb ids, written to `out`. */
   liveIds(out: number[]): number[] {
     out.length = 0;
-    for (const view of this.views.values()) {
-      if (view.leaving === 0) out.push(view.id);
+    for (let i = 0; i < this.list.length; i++) {
+      if (this.list[i].leaving === 0) out.push(this.list[i].id);
     }
     return out;
   }
@@ -307,11 +312,13 @@ export class OrbField {
     const { matrix } = this;
     let index = 0;
 
-    for (const view of this.views.values()) {
+    for (let i = this.list.length - 1; i >= 0; i--) {
+      const view = this.list[i];
       if (view.leaving > 0) {
         view.leaving -= dt;
         if (view.leaving <= 0) {
-          this.views.delete(view.id);
+          this.list.splice(i, 1);
+          this.byId.delete(view.id);
           if (view.flying) {
             this.onFlingEnd?.(view.x, view.y, view.z, view.band);
           }

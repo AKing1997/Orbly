@@ -8,7 +8,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   DoubleSide,
-  Group,
+  Matrix4,
   Mesh,
   ShaderMaterial,
   Vector3,
@@ -22,17 +22,14 @@ const WAVE_FADE = 1.1;
 /** Planes rarely change: rescanning a few times a second is plenty. */
 const SCAN_INTERVAL = 0.5;
 
-interface TrackedPlane {
-  mesh: Mesh;
-  changedAt: number;
-}
-
 type FrameWithPlanes = XRFrame & { detectedPlanes?: XRPlaneSet };
 
 export class RoomPulse {
-  readonly object = new Group();
+  /** Every plane merged into one mesh: one draw call however big the room. */
+  readonly object: Mesh;
   private readonly material: ShaderMaterial;
-  private readonly planes = new Map<XRPlane, TrackedPlane>();
+  /** Last change time of each plane, to rebuild only when something moved. */
+  private readonly planes = new Map<XRPlane, number>();
   private readonly radii = new Float32Array(WAVE_COUNT);
   private readonly strengths = new Float32Array(WAVE_COUNT);
   private readonly colors = [new Vector3(), new Vector3(), new Vector3()];
@@ -76,6 +73,8 @@ export class RoomPulse {
         }
       `,
     });
+    this.object = new Mesh(new BufferGeometry(), this.material);
+    this.object.frustumCulled = false;
     this.object.renderOrder = -1;
   }
 
@@ -114,8 +113,8 @@ export class RoomPulse {
   }
 
   clear(): void {
-    for (const tracked of this.planes.values()) this.removeMesh(tracked);
     this.planes.clear();
+    this.setGeometry(new BufferGeometry());
   }
 
   private sync(
@@ -123,55 +122,58 @@ export class RoomPulse {
     frame: XRFrame,
     space: XRReferenceSpace,
   ): void {
-    for (const [plane, tracked] of this.planes) {
-      if (!detected.has(plane)) {
-        this.removeMesh(tracked);
-        this.planes.delete(plane);
-      }
-    }
+    let changed = detected.size !== this.planes.size;
     detected.forEach((plane) => {
-      const tracked = this.planes.get(plane);
-      if (tracked !== undefined && tracked.changedAt === plane.lastChangedTime) {
-        return;
-      }
-      const pose = frame.getPose(plane.planeSpace, space);
-      if (pose === undefined || pose === null) return;
-      const mesh = tracked?.mesh ?? this.addMesh();
-      mesh.geometry.dispose();
-      mesh.geometry = polygonGeometry(plane.polygon);
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.fromArray(pose.transform.matrix);
-      mesh.matrixWorldNeedsUpdate = true;
-      this.planes.set(plane, { mesh, changedAt: plane.lastChangedTime });
+      if (this.planes.get(plane) !== plane.lastChangedTime) changed = true;
     });
+    if (!changed) return;
+
+    const placed: PlacedPolygon[] = [];
+    this.planes.clear();
+    detected.forEach((plane) => {
+      const pose = frame.getPose(plane.planeSpace, space);
+      // Left out of `planes`, so the next scan tries this one again.
+      if (pose === undefined || pose === null) return;
+      this.planes.set(plane, plane.lastChangedTime);
+      placed.push({
+        polygon: plane.polygon,
+        matrix: new Matrix4().fromArray(pose.transform.matrix),
+      });
+    });
+    this.setGeometry(mergePolygons(placed));
   }
 
-  private addMesh(): Mesh {
-    const mesh = new Mesh(new BufferGeometry(), this.material);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = -1;
-    this.object.add(mesh);
-    return mesh;
-  }
-
-  private removeMesh(tracked: TrackedPlane): void {
-    tracked.mesh.geometry.dispose();
-    this.object.remove(tracked.mesh);
+  private setGeometry(geometry: BufferGeometry): void {
+    this.object.geometry.dispose();
+    this.object.geometry = geometry;
   }
 }
 
-/** Plane polygons are convex and lie in the plane's XZ: a fan covers them. */
-export function polygonGeometry(polygon: readonly DOMPointReadOnly[]): BufferGeometry {
-  const positions = new Float32Array(polygon.length * 3);
-  polygon.forEach((point, index) => {
-    positions[index * 3] = point.x;
-    positions[index * 3 + 1] = point.y;
-    positions[index * 3 + 2] = point.z;
-  });
+export interface PlacedPolygon {
+  polygon: readonly DOMPointReadOnly[];
+  matrix: Matrix4;
+}
+
+/** Plane polygons are convex, so each becomes a triangle fan in world space. */
+export function mergePolygons(placed: readonly PlacedPolygon[]): BufferGeometry {
+  const positions: number[] = [];
   const indices: number[] = [];
-  for (let i = 1; i + 1 < polygon.length; i++) indices.push(0, i, i + 1);
+  const point = new Vector3();
+  for (const { polygon, matrix } of placed) {
+    const first = positions.length / 3;
+    for (const corner of polygon) {
+      point.set(corner.x, corner.y, corner.z).applyMatrix4(matrix);
+      positions.push(point.x, point.y, point.z);
+    }
+    for (let i = 1; i + 1 < polygon.length; i++) {
+      indices.push(first, first + i, first + i + 1);
+    }
+  }
   const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute(
+    'position',
+    new BufferAttribute(new Float32Array(positions), 3),
+  );
   geometry.setIndex(indices);
   return geometry;
 }
