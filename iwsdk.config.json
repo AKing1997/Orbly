@@ -14,7 +14,8 @@
       "offer": "none",
       "features": {
         "handTracking": true,
-        "planeDetection": true
+        "planeDetection": true,
+        "anchors": true
       }
     },
     "input": {

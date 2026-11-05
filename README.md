@@ -31,9 +31,12 @@ Throw an orb and the room takes over:
 | Sofa, bed              | Muffled hum                                        |
 | Nothing detected       | Breath of air, floating on an invisible dome       |
 
-An orb's colour shows its instrument. It flashes on the note you hear. A saved
-loop keeps each orb's direction, so opening it in another room lands the same
-song on different surfaces.
+An orb's colour shows its instrument. It flashes on the note you hear.
+
+**Your room remembers your song.** The first orb to land pins the song to a
+persistent anchor. Come back to the same room and it is already on your walls,
+exactly where you left it, wherever you sit. Open it in another room and the
+same song lands on that room's surfaces, as a different band.
 
 ## Controls
 
@@ -108,7 +111,7 @@ every push to `main`. In the repository, set **Settings → Pages → Source** t
 src/audio/        Web Audio engine, pentatonic scale, lookahead step clock
 src/sequencer/    Pure radial mapping (position -> step, note, instrument)
 src/interaction/  Pure gesture detection: pinch, grab, throw, aim, palm-up
-src/room/         Pure room model: surfaces, raycasts, throw flight, saved spots
+src/room/         Pure room model: surfaces, raycasts, throw flight, room memory
 src/visuals/      Instanced orbs, beam, floor ring, particles, room pulses
 src/ui/           Palm menu, poke buttons, onboarding, home screen
 src/state/        Composition, undo, persistence, daily challenge

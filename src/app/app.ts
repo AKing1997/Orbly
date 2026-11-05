@@ -17,6 +17,7 @@ import {
 } from '../interaction/gestures';
 import { GrabController, OrbHost } from '../interaction/grab';
 import { HandState, XRHandReader } from '../interaction/xr-hands';
+import { RoomMemory, sameFrame } from '../room/memory';
 import {
   resolveSpot,
   RoomHit,
@@ -27,6 +28,7 @@ import {
   toSpot,
 } from '../room/surfaces';
 import { assistAim, planThrow } from '../room/throw';
+import { XRAnchorBackend } from '../room/xr-anchors';
 import {
   canCreateAt,
   clampToStage,
@@ -96,6 +98,9 @@ const FAR_MIN_DISTANCE = 0.7;
 /** Lifts orbs off the surface so they sit on it, not inside it. */
 const SURFACE_OFFSET = 0.02;
 const RECALL_DONE_DISTANCE = 0.08;
+const MEMORY_CHECK_INTERVAL = 0.25;
+/** How long to look for a song in this room before leaving the user at home. */
+const ROOM_SEARCH_SECONDS = 6;
 const XR_PIXELS_PER_UNIT = 820;
 const XR_STAR_SCALE = 2;
 const SESSION_START_TIMEOUT = 12000;
@@ -121,6 +126,23 @@ export class OrblyApp implements DemoHost {
   private readonly particles = new Particles(MAX_PARTICLES);
   private readonly room = new RoomPulse();
   private readonly tethers = [new Tether(), new Tether()];
+  private readonly anchorBackend = new XRAnchorBackend();
+  private readonly memory = new RoomMemory(this.anchorBackend);
+  /** The anchor pinning the current song to this room, if it has one. */
+  private songAnchor: string | null = null;
+  /**
+   * The frame room orbs are stored in, once the song's anchor is found. Until
+   * then they are placed from the user's own stage, which is what also lets a
+   * song land on the surfaces of a different room.
+   */
+  private songStage: Stage | null = null;
+  /** Changes with each song, so a slow pin cannot land on the next one. */
+  private songToken = 0;
+  private pinning = false;
+  private anchorChanged = false;
+  private lookingForSong = false;
+  private searchTime = 0;
+  private sinceMemoryCheck = 0;
   private readonly backdrop = new Backdrop();
   private readonly toast = new Toast();
   private readonly overlay: EntryOverlay;
@@ -243,6 +265,11 @@ export class OrblyApp implements DemoHost {
   }
 
   update(dt: number, time: number): void {
+    this.step(dt, time);
+    this.anchorBackend.endFrame();
+  }
+
+  private step(dt: number, time: number): void {
     const delta = Math.min(dt, MAX_DT);
     this.head.update();
 
@@ -250,6 +277,7 @@ export class OrblyApp implements DemoHost {
     const session = this.world.session;
     const space = this.world.xrReferenceSpace;
     if (frame !== null && session !== undefined && space !== null) {
+      this.anchorBackend.beginFrame(frame, space, session);
       if (this.stage === null) this.calibrate();
       this.hands.read(frame, session, space);
     } else {
@@ -262,6 +290,7 @@ export class OrblyApp implements DemoHost {
     this.readPinches(delta);
     this.updateMode(delta, time);
     this.updateTethers();
+    this.updateRoomMemory(stage, delta);
 
     this.music.clock.tick();
     this.music.drainFlashes((id) => this.flash(id));
@@ -304,9 +333,84 @@ export class OrblyApp implements DemoHost {
 
   /** First visit: tutorial. Returning: home, or back to the loop in memory. */
   private beginExperience(): void {
-    if (!this.progress.onboarded) this.startTutorial();
-    else if (this.store.orbs.length > 0) this.setMode('play');
-    else this.goHome();
+    const known = this.library.anchors();
+    if (this.songAnchor !== null) known.add(this.songAnchor);
+    this.memory.prune(known);
+    this.memory.recall(known);
+    if (!this.progress.onboarded) {
+      this.startTutorial();
+    } else if (this.store.orbs.length > 0) {
+      this.setMode('play');
+    } else {
+      this.goHome();
+      this.lookingForSong = true;
+      this.searchTime = 0;
+    }
+  }
+
+  /** Follows the song's anchor, and finds the song that belongs to this room. */
+  private updateRoomMemory(stage: Stage, dt: number): void {
+    this.sinceMemoryCheck += dt;
+    if (this.sinceMemoryCheck < MEMORY_CHECK_INTERVAL) return;
+    const elapsed = this.sinceMemoryCheck;
+    this.sinceMemoryCheck = 0;
+
+    if (this.songAnchor !== null) {
+      const found = this.memory.locate(this.songAnchor, stage.floorY);
+      if (
+        found !== null &&
+        (this.songStage === null || !sameFrame(found, this.songStage))
+      ) {
+        this.songStage = found;
+        this.relocateOrbs();
+      }
+    }
+
+    if (!this.lookingForSong) return;
+    this.searchTime += elapsed;
+    const index = this.library
+      .list()
+      .findIndex(
+        (save) => save.anchor !== undefined && this.memory.isHere(save.anchor),
+      );
+    if (index >= 0) {
+      this.openFromHome(index);
+      this.say(t('roomRemembered'));
+    } else if (this.mode !== 'home' || this.searchTime >= ROOM_SEARCH_SECONDS) {
+      this.lookingForSong = false;
+    }
+  }
+
+  /**
+   * Fixes the song to this room, the first time one of its orbs lands here. A
+   * song opened somewhere new gets a new anchor, since its orbs now belong to
+   * this room's surfaces.
+   */
+  private pinSong(stage: Stage): void {
+    if (this.pinning || this.mode === 'demo') return;
+    if (this.songAnchor !== null && this.songStage !== null) return;
+    const token = this.songToken;
+    const frame: Stage = { ...stage };
+    this.pinning = true;
+    this.memory.pin(frame).then((uuid) => {
+      this.pinning = false;
+      if (uuid === null || token !== this.songToken) return;
+      this.songAnchor = uuid;
+      this.songStage = frame;
+      this.anchorChanged = true;
+    });
+  }
+
+  /** Starts a new song, which is pinned to `anchor` if it already has a room. */
+  private beginSong(anchor: string | null): void {
+    this.songToken++;
+    this.songAnchor = anchor;
+    this.songStage = null;
+    this.anchorChanged = false;
+    const stage = this.stage;
+    if (anchor === null || stage === null) return;
+    this.memory.recall([anchor]);
+    this.songStage = this.memory.locate(anchor, stage.floorY);
   }
 
   private setMode(mode: Mode): void {
@@ -341,6 +445,7 @@ export class OrblyApp implements DemoHost {
     this.grabs.forEach((grab) => grab.cancel());
     this.palm.reset();
     this.menu.setOpen(false, this.head.position, this.head.position);
+    this.beginSong(null);
     this.store.load(emptyComposition());
     this.saveId = null;
     this.savedRevision = this.store.revision;
@@ -355,7 +460,9 @@ export class OrblyApp implements DemoHost {
 
   private openFromHome(saveIndex: number): void {
     const save = this.library.list()[saveIndex];
+    this.lookingForSong = false;
     this.calibrate();
+    this.beginSong(save?.anchor ?? null);
     this.store.load(save?.composition ?? emptyComposition());
     this.saveId = save?.id ?? null;
     this.savedRevision = this.store.revision;
@@ -370,14 +477,18 @@ export class OrblyApp implements DemoHost {
       this.store.snapshot(),
       this.saveId,
       Date.now(),
+      this.songAnchor,
     );
     this.savedRevision = this.store.revision;
+    this.anchorChanged = false;
   }
 
   /** Never lose work on the way home. */
   private saveIfChanged(): void {
     if (this.store.orbs.length === 0) return;
-    if (this.store.revision !== this.savedRevision) this.saveCurrent();
+    if (this.store.revision !== this.savedRevision || this.anchorChanged) {
+      this.saveCurrent();
+    }
   }
 
   private updateGoal(): void {
@@ -509,6 +620,10 @@ export class OrblyApp implements DemoHost {
     this.home.hide();
     this.mode = 'idle';
     this.demo = null;
+    this.lookingForSong = false;
+    this.memory.reset();
+    this.anchorBackend.endSession();
+    this.songStage = null;
     this.music.halt();
     this.room.clear();
     this.stage = null;
@@ -522,6 +637,8 @@ export class OrblyApp implements DemoHost {
     } else {
       this.grabs.forEach((grab) => grab.cancel());
       this.music.audio.suspend();
+      // Taking the headset off may be the last thing that ever happens.
+      this.saveIfChanged();
     }
   }
 
@@ -571,7 +688,8 @@ export class OrblyApp implements DemoHost {
       slotToPosition(orb, stage, out);
       return null;
     }
-    const hit = resolveSpot(orb.spot, stage, this.room.surfaces);
+    const frame = this.songStage ?? stage;
+    const hit = resolveSpot(orb.spot, frame, this.room.surfaces);
     out.set(hit.point.x, hit.point.y, hit.point.z);
     out.addScaledVector(hit.normal as Vector3, SURFACE_OFFSET);
     return hit;
@@ -638,6 +756,7 @@ export class OrblyApp implements DemoHost {
     this.music.sound(orb);
     if (this.mode === 'tutorial') this.tutorial.flow.orbThrown();
     this.checkChallenge();
+    if (this.stage !== null) this.pinSong(this.stage);
   }
 
   private applyPalette(): void {
@@ -1013,7 +1132,7 @@ export class OrblyApp implements DemoHost {
       id,
       roomSlot(landing, stage),
       !isNew,
-      toSpot(landing.point, stage),
+      toSpot(landing.point, this.songStage ?? stage),
     );
     if (orb === null) return;
     this.landings.set(id, landing);

@@ -61,12 +61,15 @@ export interface SavedComposition {
   id: number;
   savedAt: number;
   composition: Composition;
+  /** The persistent anchor pinning this song to a real room, if any. */
+  anchor?: string;
 }
 
 interface StoredSave {
   id: number;
   at: number;
   data: string;
+  anchor?: string;
 }
 
 /** Up to six saved compositions, most recent first. */
@@ -85,18 +88,33 @@ export class Library {
    * Saves over `id` when given; otherwise adds a new entry, replacing the
    * oldest once the library is full. Returns the saved entry's id.
    */
-  save(composition: Composition, id: number | null, now: number): number {
+  save(
+    composition: Composition,
+    id: number | null,
+    now: number,
+    anchor: string | null = null,
+  ): number {
     const existing = this.saves.findIndex((save) => save.id === id);
     const entry: SavedComposition = {
       id: existing >= 0 && id !== null ? id : this.nextId(),
       savedAt: now,
       composition,
+      ...(anchor === null ? {} : { anchor }),
     };
     if (existing >= 0) this.saves.splice(existing, 1);
     this.saves.unshift(entry);
     this.saves.length = Math.min(this.saves.length, MAX_SAVES);
     this.write();
     return entry.id;
+  }
+
+  /** Every anchor a saved song still needs. */
+  anchors(): Set<string> {
+    const anchors = new Set<string>();
+    for (const save of this.saves) {
+      if (save.anchor !== undefined) anchors.add(save.anchor);
+    }
+    return anchors;
   }
 
   private nextId(): number {
@@ -118,6 +136,7 @@ export class Library {
           id: typeof entry.id === 'number' ? entry.id : saves.length + 1,
           savedAt: typeof entry.at === 'number' ? entry.at : 0,
           composition,
+          ...(typeof entry.anchor === 'string' ? { anchor: entry.anchor } : {}),
         });
       }
       return saves.slice(0, MAX_SAVES);
@@ -131,6 +150,7 @@ export class Library {
       id: save.id,
       at: save.savedAt,
       data: serialize(save.composition),
+      ...(save.anchor === undefined ? {} : { anchor: save.anchor }),
     }));
     this.storage.set(SAVES_KEY, JSON.stringify(stored));
   }

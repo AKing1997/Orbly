@@ -81,7 +81,21 @@ triángulos en el peor caso. Falta el dato real.
 - [ ] Un bucle guardado en una habitación se abre bien en otra.
 - [ ] El modo estrellas tapa la habitación y vuelve al instante.
 
-## 7. Pausa y reanudación
+## 7. Tu habitación recuerda tu canción
+
+Probado en el emulador entre visitas. Lo que falta es lo que solo un Quest puede
+decir: si reconoce la habitación de verdad, y cuánto tarda.
+
+- [ ] Lanza orbes, sal del todo, vuelve a entrar: la canción se abre sola en las paredes.
+- [ ] Los orbes vuelven al mismo punto real, sin desplazarse.
+- [ ] Sentado en otra silla de la misma sala, los orbes siguen en sus paredes.
+- [ ] Mide cuánto tarda en reconocer la sala. Si pasa de 6 s, sube `ROOM_SEARCH_SECONDS` en `src/app/app.ts`.
+- [ ] Reinicia el visor y repite.
+- [ ] En otra habitación no se abre sola, y al abrirla a mano cae en esas superficies.
+- [ ] Un orbe lanzado allí fija la canción a esa habitación.
+- [ ] Sin permiso de espacio, o en navegación privada, todo funciona sin memoria.
+
+## 8. Pausa y reanudación
 
 - [ ] El menú del sistema pausa el sonido y el haz.
 - [ ] Al volver, todo sigue donde estaba, sin ráfagas de notas.
@@ -89,7 +103,7 @@ triángulos en el peor caso. Falta el dato real.
 - [ ] Salir y volver a entrar conserva el bucle.
 - [ ] Cerrar el navegador y reabrirlo muestra los guardados en Inicio.
 
-## 8. Primera experiencia
+## 9. Primera experiencia
 
 Dásela a alguien que no la conozca y no le expliques nada.
 

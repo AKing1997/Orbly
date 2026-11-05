@@ -285,6 +285,27 @@ describe('storage', () => {
     expect(library.list()[0]).toMatchObject({ id, savedAt: 3 });
   });
 
+  it('keeps the anchor that pins a song to its room', () => {
+    const backend = memoryBackend();
+    const library = new Library(new SafeStorage(() => backend));
+    library.save(sample(), null, 1, 'room-anchor');
+    library.save(emptyComposition(), null, 2);
+    const reopened = new Library(new SafeStorage(() => backend));
+    expect(reopened.list()[1].anchor).toBe('room-anchor');
+    expect(reopened.list()[0].anchor).toBeUndefined();
+    expect([...reopened.anchors()]).toEqual(['room-anchor']);
+  });
+
+  it('forgets the anchor of a song pushed out of the library', () => {
+    const library = new Library(new SafeStorage(memoryBackend));
+    library.save(sample(), null, 0, 'oldest');
+    for (let i = 1; i <= MAX_SAVES; i++) {
+      library.save(emptyComposition(), null, i, `song-${i}`);
+    }
+    expect(library.anchors().has('oldest')).toBe(false);
+    expect(library.anchors().size).toBe(MAX_SAVES);
+  });
+
   it('ignores a corrupted library', () => {
     const backend = memoryBackend();
     backend.setItem('orbly.saves', '{oops');

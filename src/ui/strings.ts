@@ -24,6 +24,7 @@ const STRINGS = {
     cleared: 'Cleared',
     full: 'That is all the orbs',
     challengeDone: 'Challenge complete!',
+    roomRemembered: 'Your room remembered your song',
     paused: 'Paused',
   },
   es: {
@@ -47,6 +48,7 @@ const STRINGS = {
     cleared: 'Borrado',
     full: 'No caben más orbes',
     challengeDone: '¡Reto completado!',
+    roomRemembered: 'Tu habitación recordó tu canción',
     paused: 'En pausa',
   },
 } as const;

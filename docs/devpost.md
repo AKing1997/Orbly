@@ -29,15 +29,16 @@ passes. Its angle sets when it plays and its height sets the note, always on a
 pentatonic scale, so nothing can sound wrong. Point at a far orb to call it back
 to your hand, or keep some on a ring within reach.
 
-Because the room is the instrument, no two rooms sound alike. Open the same song
-somewhere else and it lands on different surfaces, as a different band.
+Your room remembers. Come back tomorrow and your song is already on your walls,
+exactly where you left it. Open it somewhere else and it lands on that room's
+surfaces instead, as a different band.
 
 ### How I built it
 
 orbly runs in the browser on the Immersive Web SDK and WebXR, in TypeScript.
 Detected planes become a model of the room: throws are simulated ahead of time
 against it, then snapped to the beat so the beam meets each orb exactly as it
-sounds. All audio is synthesized live, with eight instruments, a generated reverb
+sounds. A single persistent anchor pins each song to its room. All audio is synthesized live, with eight instruments, a generated reverb
 and HRTF spatialization per orb. There are no samples.
 
 Rendering stays small for a standalone headset: orbs are instanced and the room's
@@ -63,8 +64,8 @@ towards your gaze, and a hand resting on your lap that never does anything.
 
 ### What's next
 
-Songs that stay on your walls between sessions, a lean-back concert mode, and
-sharing a song by link, so it lands in a friend's room as their own band.
+A lean-back concert mode, and sharing a song by link, so it lands in a friend's
+room as their own band.
 
 ## How hand interactions are implemented
 
