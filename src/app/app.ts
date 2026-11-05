@@ -20,11 +20,13 @@ import { EntryOverlay } from '../ui/overlay';
 import { MenuAction, PalmMenu } from '../ui/palm-menu';
 import { t } from '../ui/strings';
 import { Toast } from '../ui/toast';
+import { Backdrop } from '../visuals/backdrop';
 import { Beam } from '../visuals/beam';
 import { OrbField } from '../visuals/orbs';
 import { Palette, PALETTES } from '../visuals/palettes';
 import { Particles } from '../visuals/particles';
 import { FloorRing } from '../visuals/ring';
+import { RoomPulse } from '../visuals/room';
 import { BEAT_FLASH, Music } from './music';
 import { SessionLifecycle } from './session';
 import { HeadPose } from './stage-pose';
@@ -34,6 +36,8 @@ const MAX_PARTICLES = 360;
 const BPM_STEP = 4;
 const QUARTER_TURN = Math.PI / 2;
 const ROTATE_RATE = 5;
+const XR_PIXELS_PER_UNIT = 820;
+const XR_STAR_SCALE = 2;
 
 export class OrblyApp implements OrbHost {
   readonly store = new CompositionStore();
@@ -49,6 +53,8 @@ export class OrblyApp implements OrbHost {
   private readonly beam = new Beam();
   private readonly ring = new FloorRing();
   private readonly particles = new Particles(MAX_PARTICLES);
+  private readonly room = new RoomPulse();
+  private readonly backdrop = new Backdrop();
   private readonly toast = new Toast();
   private readonly overlay: EntryOverlay;
   private readonly palm = new PalmUpDetector();
@@ -65,6 +71,7 @@ export class OrblyApp implements OrbHost {
   private palette: Palette = PALETTES[0];
   private inSession = false;
   private level = 0;
+  private beat = 0;
   private yawTarget = 0;
   private controllerMenuOpen = false;
   private menuButtonWasDown = false;
@@ -77,6 +84,8 @@ export class OrblyApp implements OrbHost {
     world.createTransformEntity(this.root);
     this.root.visible = false;
     this.root.add(
+      this.backdrop.object,
+      this.room.object,
       this.ring.object,
       this.beam.object,
       this.orbs.object,
@@ -140,6 +149,9 @@ export class OrblyApp implements OrbHost {
     const angle = this.music.beamAngle();
     this.beam.update(angle, stage.yaw, this.head.position, this.level);
     this.ring.update(angle, delta, this.level);
+    this.beat *= Math.exp(-delta * 5);
+    this.backdrop.update(this.head.position, this.beat, delta);
+    this.room.update(frame, space, this.head.position, delta);
     this.orbs.update(delta);
     this.particles.update(delta);
     this.toast.update(delta);
@@ -168,7 +180,8 @@ export class OrblyApp implements OrbHost {
     this.inSession = true;
     this.overlay.hide();
     this.music.unlock();
-    this.particles.setPixelsPerUnit(820);
+    this.particles.setPixelsPerUnit(XR_PIXELS_PER_UNIT);
+    this.backdrop.setPointScale(XR_STAR_SCALE);
     const session = this.world.session;
     session?.addEventListener('selectstart', this.onSelect);
   }
@@ -185,6 +198,7 @@ export class OrblyApp implements OrbHost {
     this.palm.reset();
     this.menu.setOpen(false, this.head.position, this.head.position);
     this.music.halt();
+    this.room.clear();
     this.stage = null;
     this.root.visible = false;
     this.overlay.show('ready');
@@ -254,17 +268,20 @@ export class OrblyApp implements OrbHost {
     this.orbs.setPalette(this.palette);
     this.beam.setColor(this.palette.beam);
     this.ring.setPalette(this.palette);
+    this.backdrop.setPalette(this.palette);
     this.menu.setAccent(this.palette);
   }
 
   private flash(id: number): void {
     if (id === BEAT_FLASH) {
       this.ring.pulse(0.7);
+      this.beat = 1;
       return;
     }
     this.orbs.pulse(id);
     const orb = this.store.find(id);
     if (orb === undefined) return;
+    this.room.pulse(this.palette.instruments[orb.band], 0.8);
     if (this.orbs.getPosition(id, this.scratch) !== null) {
       const { x, y, z } = this.scratch;
       this.particles.burst(x, y, z, this.palette.instruments[orb.band], {
@@ -349,10 +366,19 @@ export class OrblyApp implements OrbHost {
         }
         break;
       case 'backdrop':
+        this.setBackdrop(!this.backdrop.enabled);
+        break;
       case 'save':
       case 'home':
         break;
     }
+  }
+
+  /** Switches between the real room and the starfield, instantly. */
+  private setBackdrop(starfield: boolean): void {
+    this.backdrop.enabled = starfield;
+    this.room.object.visible = !starfield;
+    this.menu.setBackdrop(starfield);
   }
 
   private say(text: string): void {
