@@ -1,0 +1,48 @@
+/**
+ * Pentatonic quantization. Every pitch orbly plays passes through here, so
+ * nothing can be out of key no matter where an orb is placed.
+ */
+
+/** Major pentatonic, in semitones above the root. */
+export const PENTATONIC: readonly number[] = [0, 2, 4, 7, 9];
+
+/** Root note of each band: pluck, pad, bass. */
+export const BAND_ROOT_MIDI: readonly number[] = [60, 48, 36];
+
+/** Semitones above the root for a scale degree of any size. */
+export function degreeToSemitones(degree: number): number {
+  const size = PENTATONIC.length;
+  const octave = Math.floor(degree / size);
+  const index = ((degree % size) + size) % size;
+  return octave * 12 + PENTATONIC[index];
+}
+
+export function degreeToMidi(degree: number, band: number): number {
+  return BAND_ROOT_MIDI[band] + degreeToSemitones(degree);
+}
+
+/** Snaps any semitone offset to the closest scale tone (lower one on a tie). */
+export function quantizeSemitones(semitones: number): number {
+  const rounded = Math.round(semitones);
+  const octave = Math.floor(rounded / 12);
+  const pitchClass = rounded - octave * 12;
+  let best = 0;
+  let bestDistance = Infinity;
+  for (const tone of [...PENTATONIC, 12]) {
+    const distance = Math.abs(tone - pitchClass);
+    if (distance < bestDistance) {
+      best = tone;
+      bestDistance = distance;
+    }
+  }
+  return octave * 12 + best;
+}
+
+export function isInScale(semitones: number): boolean {
+  const pitchClass = ((semitones % 12) + 12) % 12;
+  return PENTATONIC.includes(pitchClass);
+}
+
+export function midiToFrequency(midi: number): number {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
