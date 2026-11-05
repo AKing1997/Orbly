@@ -1,6 +1,7 @@
 /**
- * One hand's orb state machine: hover, create, drag, release, throw. The
- * host owns the orbs; this decides what the hand means.
+ * One hand's orb state machine: hover, create, drag, release, throw, and
+ * calling back orbs stuck to the room. The host owns the orbs; this decides
+ * what the hand means.
  */
 
 import { Vec3Like } from '../sequencer/mapping';
@@ -10,12 +11,17 @@ import { PinchEdges, VelocityTracker } from './gestures';
 export interface OrbHost {
   /** Closest orb within `radius`, or -1. */
   pick(point: Vec3Like, radius: number): number;
+  /** The orb on a surface this hand is pointing at, or -1. */
+  pickFar(hand: number): number;
   /** Creates an orb at `point`; returns its id or -1 when not possible. */
   create(point: Vec3Like): number;
   beginDrag(id: number): void;
+  /** Starts flying a far orb back to the hand. */
+  recall(id: number): void;
   drag(id: number, point: Vec3Like): void;
   drop(id: number, point: Vec3Like): void;
-  discard(id: number, velocity: Vec3Like): void;
+  /** Throws the orb at the room. */
+  fling(id: number, velocity: Vec3Like): void;
   setHover(hand: number, id: number): void;
 }
 
@@ -34,6 +40,8 @@ export class GrabController {
   private hoverId = -1;
   private readonly tracker = new VelocityTracker();
   private readonly velocity: Vec3Like = { x: 0, y: 0, z: 0 };
+  /** Where the held orb is, ignoring the jump of fingers letting go. */
+  private readonly settled: Vec3Like = { x: 0, y: 0, z: 0 };
   private wasOpening = false;
 
   constructor(
@@ -48,6 +56,8 @@ export class GrabController {
   /**
    * @param point pinch position, or null when the hand is unavailable.
    * @param enabled false while the hand is busy with UI.
+   * @param steady a part of the hand that keeps still as the fingers open. The
+   * pinch point jumps at that very moment, which would bend every throw.
    */
   update(
     point: Vec3Like | null,
@@ -55,6 +65,7 @@ export class GrabController {
     enabled: boolean,
     time: number,
     dt: number,
+    steady: Vec3Like | null = point,
   ): void {
     if (point === null) {
       this.setHover(-1);
@@ -62,7 +73,7 @@ export class GrabController {
       return;
     }
 
-    this.tracker.push(time, point);
+    this.tracker.push(time, steady ?? point);
     this.lastPoint.x = point.x;
     this.lastPoint.y = point.y;
     this.lastPoint.z = point.z;
@@ -70,11 +81,19 @@ export class GrabController {
     if (this.heldId >= 0) {
       this.setHover(-1);
       this.heldFor += dt;
-      this.host.drag(this.heldId, point);
+      // Parting fingers drag the point between them along, so the orb stays
+      // where it was when they began to open: otherwise it would land a note
+      // above where the user let it go.
+      if (!pinch.opening && !pinch.ended) {
+        this.settled.x = point.x;
+        this.settled.y = point.y;
+        this.settled.z = point.z;
+      }
+      this.host.drag(this.heldId, this.settled);
       if (pinch.opening && !this.wasOpening) {
         this.tracker.velocity(this.velocity);
       }
-      if (pinch.ended) this.release(point, this.wasOpening);
+      if (pinch.ended) this.release(this.settled, this.wasOpening);
       this.wasOpening = pinch.opening;
       return;
     }
@@ -84,20 +103,32 @@ export class GrabController {
       return;
     }
 
-    const hover = pinch.active ? -1 : this.host.pick(point, HOVER_RADIUS);
-    this.setHover(hover);
+    this.setHover(pinch.active ? -1 : this.findHover(point));
 
     if (pinch.started) {
-      const near = this.host.pick(point, GRAB_RADIUS);
-      const id = near >= 0 ? near : this.host.create(point);
+      let id = this.host.pick(point, GRAB_RADIUS);
+      if (id < 0) {
+        id = this.host.pickFar(this.hand);
+        if (id >= 0) this.host.recall(id);
+      }
+      if (id < 0) id = this.host.create(point);
       if (id >= 0) {
         this.heldId = id;
         this.heldFor = 0;
         this.wasOpening = false;
+        this.settled.x = point.x;
+        this.settled.y = point.y;
+        this.settled.z = point.z;
         this.setHover(-1);
         this.host.beginDrag(id);
       }
     }
+  }
+
+  /** What a pinch would take right now: something close wins over far. */
+  private findHover(point: Vec3Like): number {
+    const near = this.host.pick(point, HOVER_RADIUS);
+    return near >= 0 ? near : this.host.pickFar(this.hand);
   }
 
   /** Drops whatever is held, as when the session pauses. */
@@ -124,7 +155,7 @@ export class GrabController {
       : this.tracker.velocity(this.velocity);
     const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
     if (speed >= THROW_SPEED && this.heldFor >= MIN_HOLD_BEFORE_THROW) {
-      this.host.discard(id, velocity);
+      this.host.fling(id, velocity);
     } else {
       this.host.drop(id, point);
     }

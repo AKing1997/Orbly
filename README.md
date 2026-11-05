@@ -1,9 +1,10 @@
 # orbly
 
 A spatial music toy for Meta Quest. You sit down and, with nothing but your
-hands, place orbs of light around you. A beam of light sweeps slowly around you
-like the hand of a clock; each orb sings as it passes. In a couple of minutes
-you are sitting inside a loop you made, and your real room pulses with it.
+hands, place orbs of light around you, or throw them at your real walls, table
+and floor, where they stick and start to sing. A beam sweeps around the room
+like a lighthouse, and each orb sounds as it passes. Because every surface plays
+a different instrument, every room is a different band.
 
 No musical knowledge needed: every position is in key, on the beat.
 
@@ -20,7 +21,19 @@ third-party music.
 | Height                 | Which note (always on a pentatonic scale)          |
 | Near / middle / far    | Which instrument: pluck, pad or bass               |
 
-An orb's colour shows its instrument. It flashes on the note you hear.
+Throw an orb and the room takes over:
+
+| Where it lands         | What it plays                                      |
+| ---------------------- | -------------------------------------------------- |
+| Wall, door, window     | Bell, rising in pitch from floor to ceiling        |
+| Table, desk            | Marimba, rising in pitch away from you             |
+| Floor                  | Soft drum                                          |
+| Sofa, bed              | Muffled hum                                        |
+| Nothing detected       | Breath of air, floating on an invisible dome       |
+
+An orb's colour shows its instrument. It flashes on the note you hear. A saved
+loop keeps each orb's direction, so opening it in another room lands the same
+song on different surfaces.
 
 ## Controls
 
@@ -31,13 +44,16 @@ are never needed.
 | ----------------------------- | ----------------------------------------- |
 | Pinch in empty air            | Create an orb at your fingertips          |
 | Pinch an orb and drag         | Move it (you hear the pitch as it moves)  |
-| Let go of an orb mid-throw    | Delete it                                 |
+| Let go of an orb mid-throw    | It flies to the room and sticks there     |
+| Point at a far orb until a line of light appears, then pinch | Call it back to your hand |
+| Let go of an orb over your lap | Delete it (it fades as you lower it)     |
 | Turn your left palm up        | Open the menu                             |
 | Press a button with the other index finger | Use the menu                 |
 
 The menu holds tempo, play/pause, undo, rotate, colour scene, room/starfield,
-save, clear and home. **Rotate** turns the ring a quarter turn, so the part of
-the loop behind you can be reached without leaving your seat.
+save, clear and home. **Rotate** turns the near ring a quarter turn, so the part
+of the loop behind you can be reached without leaving your seat. Orbs on the
+room stay where they are: they are stuck to it.
 
 With controllers, the trigger pinches and X opens the menu.
 
@@ -91,15 +107,16 @@ every push to `main`. In the repository, set **Settings → Pages → Source** t
 ```
 src/audio/        Web Audio engine, pentatonic scale, lookahead step clock
 src/sequencer/    Pure radial mapping (position -> step, note, instrument)
-src/interaction/  Pure gesture detection: pinch, grab, throw, palm-up
+src/interaction/  Pure gesture detection: pinch, grab, throw, aim, palm-up
+src/room/         Pure room model: surfaces, raycasts, throw flight, saved spots
 src/visuals/      Instanced orbs, beam, floor ring, particles, room pulses
 src/ui/           Palm menu, poke buttons, onboarding, home screen
 src/state/        Composition, undo, persistence, daily challenge
 src/app/          Wires it together; session lifecycle; demo director
 ```
 
-`sequencer`, `state` and the detectors in `interaction` have no rendering or
-WebXR dependencies, which is what lets them run under Vitest on simulated joint
+`sequencer`, `room`, `state` and the detectors in `interaction` have no rendering
+or WebXR dependencies, which is what lets them run under Vitest on simulated joint
 data.
 
 See [docs/quest-testing.md](docs/quest-testing.md) for the on-device checklist.

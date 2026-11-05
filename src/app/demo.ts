@@ -52,6 +52,13 @@ const BLOOM: readonly Slot[] = [
   { step: 11, degree: 4, band: 0 },
 ];
 
+/** Orbs that leave the ring, and where they are thrown. */
+const ROOM_THROWS: readonly [Slot, Vector3][] = [
+  [{ step: 3, degree: 8, band: 0 }, new Vector3(0.75, 0.25, -0.6).normalize()],
+  [{ step: 14, degree: 3, band: 0 }, new Vector3(-0.8, 0.2, -0.55).normalize()],
+  [{ step: 15, degree: 4, band: 0 }, new Vector3(-0.1, -0.5, -0.85).normalize()],
+];
+
 const EYE_HEIGHT = 1.22;
 
 interface Segment {
@@ -122,6 +129,14 @@ const POV: CameraKey = {
   height: 1.42,
   lookHeight: 0.98,
   lookAhead: 0.35,
+};
+/** Behind the seat at eye level: the room fills the frame for the throws. */
+const ROOM_SHOT: CameraKey = {
+  angle: 0,
+  radius: 0.7,
+  height: 1.4,
+  lookHeight: 1.2,
+  lookAhead: 2,
 };
 /** Close on the palm menu, so its buttons read in a flat video. */
 const MENU_SHOT: CameraKey = {
@@ -226,9 +241,11 @@ export class DemoDirector {
     return [
       this.hold(9),
       this.moveCamera(POV, 5),
-      this.hold(22),
+      this.hold(20),
+      this.moveCamera(ROOM_SHOT, 2),
+      this.hold(10.5),
       this.moveCamera(MENU_SHOT, 1.8),
-      this.hold(8.2),
+      this.hold(11),
       this.moveCamera(RAISED, 6),
       this.moveCamera(LOW_ORBIT, 13),
       this.moveCamera(HIGH_ORBIT, 16),
@@ -291,6 +308,12 @@ export class DemoDirector {
     for (const slot of HAND_PLACED) segments.push(...this.place(slot));
     segments.push(wait(1.5));
     segments.push(...this.raise({ step: 1, degree: 7, band: 0 }, 9));
+    segments.push(wait(1.5));
+    // Three throws at the room, the moment the video is really about.
+    for (const [slot, direction] of ROOM_THROWS) {
+      segments.push(...this.throwOrb(slot, direction));
+      segments.push(wait(1.2));
+    }
     segments.push(wait(2));
     segments.push(...this.menuScene());
     segments.push(wait(1));
@@ -310,10 +333,7 @@ export class DemoDirector {
     segments.push(wait(9));
     segments.push({ duration: 0, end: () => this.host.menuAction('scene') });
     segments.push(wait(9));
-    segments.push(...this.throwAway({ step: 3, degree: 8, band: 0 }));
-    segments.push(wait(2.5));
-    segments.push({ duration: 0, end: () => this.host.menuAction('undo') });
-    segments.push(wait(12));
+    segments.push(wait(3));
     segments.push({
       duration: 1.2,
       end: () => {
@@ -462,7 +482,8 @@ export class DemoDirector {
     ];
   }
 
-  private throwAway(slot: Slot): Segment[] {
+  /** Grabs an orb, winds up and throws it at the room. */
+  private throwOrb(slot: Slot, direction: Vector3): Segment[] {
     const target = new Vector3();
     const flung = new Vector3();
     const velocity = new Vector3();
@@ -473,8 +494,8 @@ export class DemoDirector {
         begin: () => {
           slotToPosition(slot, stage, target);
           this.held = this.host.orbAt(slot);
-          flung.copy(target).add(new Vector3(0.45, 0.22, -0.5));
-          velocity.subVectors(flung, target).multiplyScalar(4.2);
+          flung.copy(target).addScaledVector(direction, 0.32);
+          velocity.copy(direction).multiplyScalar(2.6);
         },
         update: (progress) => {
           this.goal.lerpVectors(this.rest, target, ease(progress));
@@ -489,14 +510,14 @@ export class DemoDirector {
         },
       },
       {
-        duration: 0.24,
+        duration: 0.2,
         update: (progress) => {
           this.goal.lerpVectors(target, flung, progress * progress);
           this.poseRight(1, 0, 1);
           if (this.held >= 0) this.host.drag(this.held, this.goal);
         },
         end: () => {
-          if (this.held >= 0) this.host.discard(this.held, velocity);
+          if (this.held >= 0) this.host.fling(this.held, velocity);
           this.held = -1;
         },
       },

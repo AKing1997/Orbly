@@ -296,3 +296,33 @@ export class VelocityTracker {
     return out;
   }
 }
+
+/** How long a hand must keep pointing at a far orb before it can be taken. */
+export const AIM_DWELL = 0.35;
+
+/**
+ * Pointing has to be deliberate. A hand pinching in the air usually happens to
+ * point at the walls too, so without this every new orb would risk calling
+ * back one already stuck there. The tether only shows once this passes, so
+ * what a pinch will do is never a surprise.
+ */
+export class AimDwell {
+  private target = -1;
+  private time = 0;
+
+  /** @returns the orb that can be taken now, or -1. */
+  update(candidate: number, dt: number): number {
+    if (candidate !== this.target) {
+      this.target = candidate;
+      this.time = 0;
+      return -1;
+    }
+    this.time += dt;
+    return candidate >= 0 && this.time >= AIM_DWELL ? candidate : -1;
+  }
+
+  reset(): void {
+    this.target = -1;
+    this.time = 0;
+  }
+}

@@ -23,13 +23,17 @@ import { TouchTargets } from './touch';
 
 const PINCH_LOOP = 2.8;
 const RAISE_LOOP = 3.2;
+const THROW_LOOP = 2.6;
 const PALM_LOOP = 2.8;
+/** How far the hint orb travels when the ghost hand throws it. */
+const THROW_HINT_REACH = 1.5;
 const RAISE_HEIGHT = 0.17;
 const SKIP_RADIUS = 0.05;
 
 const TEXT: Record<Exclude<TutorialStep, 'done'>, StringKey> = {
   pinch: 'tutorialPinch',
   raise: 'tutorialRaise',
+  throw: 'tutorialThrow',
   palm: 'tutorialPalm',
 };
 
@@ -212,6 +216,9 @@ export class TutorialView {
       case 'raise':
         this.animateRaise();
         break;
+      case 'throw':
+        this.animateThrow(this.stage);
+        break;
       case 'palm':
         this.animatePalm(this.stage);
         break;
@@ -271,6 +278,29 @@ export class TutorialView {
     this.orbHint.visible = pinch > 0.05;
     this.orbMaterial.uniforms.uOpacity.value = pinch;
     this.orbHint.position.copy(this.goal);
+  }
+
+  /** Winds back, flicks forward and lets the orb fly on towards the room. */
+  private animateThrow(stage: Stage): void {
+    const phase = (this.time % THROW_LOOP) / THROW_LOOP;
+    polarToPosition(0.1, 1, { ...stage, x: 0, z: 0 }, this.point);
+    this.point.y = 0.12;
+    this.point.normalize();
+    const forward = this.point;
+    const windUp = ramp(phase, 0.16, 0.34) * -0.09;
+    const flick = ramp(phase, 0.34, 0.46) * 0.24;
+    this.goal.copy(this.orbSpot).addScaledVector(forward, windUp + flick);
+    this.pointFromRight(stage);
+    const pinch = ramp(phase, 0.06, 0.16) * (1 - ramp(phase, 0.44, 0.5));
+    this.placeRight(pinch, ramp(phase, 0, 0.08) * (1 - ramp(phase, 0.86, 1)));
+    this.left.opacity = 0;
+
+    const flight = ramp(phase, 0.44, 0.8);
+    const hint = ramp(phase, 0.1, 0.16) * (1 - ramp(phase, 0.78, 0.9));
+    this.orbHint.visible = hint > 0.01;
+    this.orbMaterial.uniforms.uOpacity.value = hint;
+    this.orbHint.position.copy(this.goal);
+    this.orbHint.position.addScaledVector(forward, flight * THROW_HINT_REACH);
   }
 
   private animatePalm(stage: Stage): void {

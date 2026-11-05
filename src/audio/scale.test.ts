@@ -30,6 +30,10 @@ describe('every reachable note', () => {
     }
   });
 
+  it('puts every instrument in the same key', () => {
+    for (const root of BAND_ROOT_MIDI) expect(root % 12).toBe(0);
+  });
+
   it('rises strictly with height', () => {
     for (let degree = 1; degree < DEGREE_COUNT; degree++) {
       expect(degreeToMidi(degree, 0)).toBeGreaterThan(

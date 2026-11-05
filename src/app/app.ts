@@ -9,12 +9,28 @@ import {
   Vector3,
   World,
 } from '@iwsdk/core';
-import { PalmUpDetector, PinchDetector, PinchEdges } from '../interaction/gestures';
+import {
+  AimDwell,
+  PalmUpDetector,
+  PinchDetector,
+  PinchEdges,
+} from '../interaction/gestures';
 import { GrabController, OrbHost } from '../interaction/grab';
 import { HandState, XRHandReader } from '../interaction/xr-hands';
 import {
+  resolveSpot,
+  RoomHit,
+  roomSlot,
+  snapToStep,
+  stageEye,
+  SURFACE_BAND,
+  toSpot,
+} from '../room/surfaces';
+import { assistAim, planThrow } from '../room/throw';
+import {
   canCreateAt,
   clampToStage,
+  dropZoneAmount,
   makeStage,
   polarToPosition,
   positionToSlot,
@@ -24,7 +40,7 @@ import {
   Vec3Like,
 } from '../sequencer/mapping';
 import { challengeFor, dateKey } from '../state/challenge';
-import { emptyComposition, MAX_ORBS } from '../state/composition';
+import { emptyComposition, MAX_ORBS, OrbData } from '../state/composition';
 import { browserStorage, Library, Progress } from '../state/storage';
 import { CompositionStore, StoreEvent } from '../state/store';
 import { HomeScreen } from '../ui/home';
@@ -40,6 +56,7 @@ import { Palette, PALETTES } from '../visuals/palettes';
 import { Particles } from '../visuals/particles';
 import { FloorRing } from '../visuals/ring';
 import { RoomPulse } from '../visuals/room';
+import { Tether } from '../visuals/tether';
 import { DemoDirector, DemoHost } from './demo';
 import { BEAT_FLASH, Music } from './music';
 import { SessionLifecycle } from './session';
@@ -70,8 +87,15 @@ const MAX_DT = 0.1;
 const CELEBRATION_CHORD = [72, 76, 79, 84];
 const MAX_PARTICLES = 360;
 const BPM_STEP = 4;
-const QUARTER_TURN = Math.PI / 2;
-const ROTATE_RATE = 5;
+/** Quarter turn of the ring, bringing what was on the right to the front. */
+const RING_TURN_STEPS = -4;
+/** cos 8 degrees: how precisely a hand must point at a far orb. */
+const FAR_AIM_COSINE = 0.99;
+/** Closer than this an orb is simply within reach. */
+const FAR_MIN_DISTANCE = 0.7;
+/** Lifts orbs off the surface so they sit on it, not inside it. */
+const SURFACE_OFFSET = 0.02;
+const RECALL_DONE_DISTANCE = 0.08;
 const XR_PIXELS_PER_UNIT = 820;
 const XR_STAR_SCALE = 2;
 const SESSION_START_TIMEOUT = 12000;
@@ -96,15 +120,26 @@ export class OrblyApp implements DemoHost {
   private readonly ring = new FloorRing();
   private readonly particles = new Particles(MAX_PARTICLES);
   private readonly room = new RoomPulse();
+  private readonly tethers = [new Tether(), new Tether()];
   private readonly backdrop = new Backdrop();
   private readonly toast = new Toast();
   private readonly overlay: EntryOverlay;
   private readonly palm = new PalmUpDetector();
   private readonly pinches = [new PinchDetector(), new PinchDetector()];
   private readonly grabs: GrabController[];
+  private readonly aims = [new AimDwell(), new AimDwell()];
+  /** The far orb each hand has pointed at for long enough, or -1. */
+  private readonly aimed = [-1, -1];
   private readonly scratch = new Vector3();
   /** Separate from `scratch`: store events fire in the middle of its users. */
   private readonly eventScratch = new Vector3();
+  private readonly tetherScratch = new Vector3();
+  /** The stage centre at eye level, where the room's light sweeps from. */
+  private readonly eye = new Vector3();
+  /** Where each flying orb will come to rest. */
+  private readonly landings = new Map<number, RoomHit>();
+  /** Far orbs on their way back to the hand that called them. */
+  private readonly reeling = new Set<number>();
   /** Orbs still in the gesture that created them: one gesture, one undo. */
   private readonly freshOrbs = new Set<number>();
   private readonly dropSlot: Slot = { step: 0, degree: 0, band: 0 };
@@ -116,7 +151,6 @@ export class OrblyApp implements DemoHost {
   private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private level = 0;
   private beat = 0;
-  private yawTarget = 0;
   private controllerMenuOpen = false;
   private menuButtonWasDown = false;
   private readonly demoRequested: boolean;
@@ -142,7 +176,10 @@ export class OrblyApp implements DemoHost {
     this.library = new Library(storage);
     this.progress = new Progress(storage);
     this.pinchPoints = [this.hands.left.pinchPoint, this.hands.right.pinchPoint];
-    this.music = new Music(this.store, (id) => this.isHeld(id));
+    this.music = new Music(
+      this.store,
+      (id) => this.isHeld(id) || this.orbs.isFlying(id),
+    );
     this.grabs = [new GrabController(0, this), new GrabController(1, this)];
 
     world.createTransformEntity(this.root);
@@ -154,6 +191,8 @@ export class OrblyApp implements DemoHost {
       this.beam.object,
       this.orbs.object,
       this.particles.object,
+      this.tethers[0].object,
+      this.tethers[1].object,
       this.menu.object,
       this.home.object,
       this.tutorial.object,
@@ -164,15 +203,8 @@ export class OrblyApp implements DemoHost {
     this.updateGoal();
     this.home.onPick = (index) => this.openFromHome(index);
     this.tutorial.onSkip = () => this.finishTutorial(false);
-    this.orbs.onFlingEnd = (x, y, z, band) => {
-      this.particles.burst(x, y, z, this.palette.instruments[band], {
-        count: 26,
-        speed: 0.5,
-        size: 0.014,
-        life: 0.7,
-      });
-      this.music.audio.ui('pop');
-    };
+    this.orbs.onLand = (id) => this.onOrbLanded(id);
+    this.room.onSurfacesChanged = () => this.relocateOrbs();
     this.applyPalette();
 
     this.store.subscribe((event) => this.onStoreEvent(event));
@@ -228,8 +260,8 @@ export class OrblyApp implements DemoHost {
     if (stage === null) return;
 
     this.readPinches(delta);
-    this.updateStageRotation(delta);
     this.updateMode(delta, time);
+    this.updateTethers();
 
     this.music.clock.tick();
     this.music.drainFlashes((id) => this.flash(id));
@@ -244,7 +276,7 @@ export class OrblyApp implements DemoHost {
     this.ring.update(angle, delta, this.level);
     this.beat *= Math.exp(-delta * 5);
     this.backdrop.update(this.head.position, this.beat, delta);
-    this.room.update(frame, space, this.head.position, delta);
+    this.room.update(frame, space, this.eye, angle - stage.yaw, this.level, delta);
     this.orbs.update(delta);
     this.particles.update(delta);
     this.toast.update(delta);
@@ -255,14 +287,19 @@ export class OrblyApp implements DemoHost {
     const { position, yaw } = this.head;
     if (position.lengthSq() === 0) return;
     const floorY = position.y > 0.6 ? 0 : position.y - 1.15;
-    this.stage = makeStage(position, yaw, floorY);
-    this.yawTarget = yaw;
-    this.beam.setStage(this.stage);
-    this.ring.setStage(this.stage);
-    this.root.visible = true;
+    this.fitStage(makeStage(position, yaw, floorY));
     this.relocateOrbs();
     this.music.run();
     if (this.mode === 'idle') this.beginExperience();
+  }
+
+  private fitStage(stage: Stage): void {
+    this.stage = stage;
+    const { x, y, z } = stageEye(stage);
+    this.eye.set(x, y, z);
+    this.beam.setStage(stage);
+    this.ring.setStage(stage);
+    this.root.visible = true;
   }
 
   /** First visit: tutorial. Returning: home, or back to the loop in memory. */
@@ -401,15 +438,8 @@ export class OrblyApp implements DemoHost {
 
   private startDemo(): void {
     const { fov } = this.world.camera;
-    this.stage = makeStage(
-      { x: 0, y: DEMO_EYE_HEIGHT, z: 0 },
-      0,
-      0,
-    );
-    this.yawTarget = 0;
-    this.beam.setStage(this.stage);
-    this.ring.setStage(this.stage);
-    this.root.visible = true;
+    const stage = makeStage({ x: 0, y: DEMO_EYE_HEIGHT, z: 0 }, 0, 0);
+    this.fitStage(stage);
     if (!this.inSession) {
       const height = this.world.renderer.domElement.height;
       this.particles.setPixelsPerUnit(
@@ -421,7 +451,7 @@ export class OrblyApp implements DemoHost {
     this.music.run();
     this.demo = new DemoDirector(
       this,
-      this.stage,
+      stage,
       this.root,
       () => this.palette.beam,
     );
@@ -501,7 +531,7 @@ export class OrblyApp implements DemoHost {
       case 'add':
       case 'move':
         if (stage !== null) {
-          slotToPosition(event.orb, stage, this.eventScratch);
+          this.placeOf(event.orb, stage, this.eventScratch);
           this.music.audio.setOrbPosition(event.orb.id, this.eventScratch);
         }
         this.checkChallenge();
@@ -532,6 +562,26 @@ export class OrblyApp implements DemoHost {
     }
   }
 
+  /**
+   * Where an orb rests, written to `out`. Returns the surface it sits on, or
+   * null for an orb on the near ring.
+   */
+  private placeOf(orb: OrbData, stage: Stage, out: Vector3): RoomHit | null {
+    if (orb.spot === undefined) {
+      slotToPosition(orb, stage, out);
+      return null;
+    }
+    const hit = resolveSpot(orb.spot, stage, this.room.surfaces);
+    out.set(hit.point.x, hit.point.y, hit.point.z);
+    out.addScaledVector(hit.normal as Vector3, SURFACE_OFFSET);
+    return hit;
+  }
+
+  /** Far orbs grow a little, so one across the room still reads. */
+  private orbSizeAt(point: Vec3Like): number {
+    return 1 + 0.32 * this.eye.distanceTo(point as Vector3);
+  }
+
   /** Brings views and panners in line with the store, whatever changed. */
   private relocateOrbs(): void {
     const stage = this.stage;
@@ -544,15 +594,50 @@ export class OrblyApp implements DemoHost {
       }
     }
     for (const orb of this.store.orbs) {
-      slotToPosition(orb, stage, position);
+      // Hands and flights own their orbs until they let go.
+      if (this.isHeld(orb.id) || this.orbs.isFlying(orb.id)) continue;
+      const hit = this.placeOf(orb, stage, position);
+      // The same song turns into a different band in a different room.
+      if (hit !== null) this.store.setRoomBand(orb.id, SURFACE_BAND[hit.kind]);
       if (this.orbs.has(orb.id)) {
         this.orbs.setBand(orb.id, orb.band);
         this.orbs.moveTo(orb.id, position);
       } else {
         this.orbs.spawn(orb.id, orb.band, position);
       }
+      this.orbs.stick(
+        orb.id,
+        hit === null ? null : hit.normal,
+        hit === null ? 1 : this.orbSizeAt(hit.point),
+      );
       this.music.audio.setOrbPosition(orb.id, position);
     }
+  }
+
+  private onOrbLanded(id: number): void {
+    const orb = this.store.find(id);
+    const landing = this.landings.get(id);
+    this.landings.delete(id);
+    if (orb === undefined || landing === undefined) return;
+    const { point, normal } = landing;
+    const color = this.palette.instruments[orb.band];
+    this.orbs.stick(id, normal, this.orbSizeAt(point));
+    this.scratch.set(point.x, point.y, point.z);
+    this.orbs.moveTo(
+      id,
+      this.scratch.addScaledVector(normal as Vector3, SURFACE_OFFSET),
+    );
+    this.particles.burst(point.x, point.y, point.z, color, {
+      count: 26,
+      speed: 0.6,
+      size: 0.016,
+      life: 0.8,
+    });
+    this.room.pulse(color, 1, point);
+    this.orbs.pulse(id);
+    this.music.sound(orb);
+    if (this.mode === 'tutorial') this.tutorial.flow.orbThrown();
+    this.checkChallenge();
   }
 
   private applyPalette(): void {
@@ -561,6 +646,7 @@ export class OrblyApp implements DemoHost {
     this.beam.setColor(this.palette.beam);
     this.ring.setPalette(this.palette);
     this.backdrop.setPalette(this.palette);
+    this.room.setBeamColor(this.palette.beam);
     this.menu.setAccent(this.palette);
     this.tutorial.setPalette(this.palette);
   }
@@ -575,11 +661,14 @@ export class OrblyApp implements DemoHost {
     const orb = this.store.find(id);
     if (orb === undefined) return;
     if (this.mode === 'tutorial' && this.tutorial.flow.orbSounded()) {
-      this.tutorial.setOrbSpot(slotToPosition(orb, this.stage as Stage, this.eventScratch));
+      this.placeOf(orb, this.stage as Stage, this.eventScratch);
+      this.tutorial.setOrbSpot(this.eventScratch);
     }
-    this.room.pulse(this.palette.instruments[orb.band], 0.8);
+    const color = this.palette.instruments[orb.band];
+    if (orb.spot === undefined) this.room.pulse(color, 0.8, this.eye);
     if (this.orbs.getPosition(id, this.scratch) !== null) {
       const { x, y, z } = this.scratch;
+      if (orb.spot !== undefined) this.room.pulse(color, 0.8, this.scratch);
       this.particles.burst(x, y, z, this.palette.instruments[orb.band], {
         count: 6,
         speed: 0.16,
@@ -591,18 +680,6 @@ export class OrblyApp implements DemoHost {
 
   private isHeld(id: number): boolean {
     return this.grabs[0].held === id || this.grabs[1].held === id;
-  }
-
-  /** Eases the ring towards its target after the rotate button. */
-  private updateStageRotation(dt: number): void {
-    const stage = this.stage;
-    if (stage === null) return;
-    const remaining = this.yawTarget - stage.yaw;
-    if (Math.abs(remaining) < 1e-4) return;
-    stage.yaw += remaining * (1 - Math.exp(-dt * ROTATE_RATE));
-    if (Math.abs(this.yawTarget - stage.yaw) < 1e-4) stage.yaw = this.yawTarget;
-    this.ring.setStage(stage);
-    this.relocateOrbs();
   }
 
   private readPinches(dt: number): void {
@@ -693,9 +770,7 @@ export class OrblyApp implements DemoHost {
         if (!this.store.undo()) audio.ui('error');
         break;
       case 'rotate':
-        // Brings what was on the user's right to the front.
-        this.yawTarget -= QUARTER_TURN;
-        audio.ui('whoosh');
+        audio.ui(this.store.rotateRing(RING_TURN_STEPS) ? 'whoosh' : 'error');
         break;
       case 'scene':
         this.store.setScene(this.store.sceneId + 1);
@@ -788,13 +863,42 @@ export class OrblyApp implements DemoHost {
     dt: number,
     time: number,
   ): void {
+    // A hand holding something, or busy with UI, is not pointing at the room.
+    const pointing = enabled && hand.hasRay && this.grabs[index].held < 0;
+    const candidate = pointing
+      ? this.orbs.nearestInCone(
+        hand.rayOrigin,
+        hand.rayDirection,
+        FAR_AIM_COSINE,
+        FAR_MIN_DISTANCE,
+      )
+      : -1;
+    this.aimed[index] = this.aims[index].update(candidate, dt);
     this.grabs[index].update(
       hand.tracked ? hand.pinchPoint : null,
       this.edges[index],
       enabled,
       time,
       dt,
+      hand.tracked ? hand.steadyPoint : null,
     );
+  }
+
+  /** Shows which far orb a pinch would call back, while a hand points at it. */
+  private updateTethers(): void {
+    for (let index = 0; index < 2; index++) {
+      const id = this.hoverIds[index];
+      const hand = index === 0 ? this.hands.left : this.hands.right;
+      const target = id >= 0 && this.orbs.isStuck(id)
+        ? this.orbs.getPosition(id, this.tetherScratch)
+        : null;
+      if (target === null) {
+        this.tethers[index].hide();
+      } else {
+        const color = this.palette.instruments[this.store.find(id)?.band ?? 0];
+        this.tethers[index].show(hand.pinchPoint, target, color);
+      }
+    }
   }
 
   private pulseHaptics(hand: number, strength: number, ms: number): void {
@@ -807,6 +911,16 @@ export class OrblyApp implements DemoHost {
 
   pick(point: Vec3Like, radius: number): number {
     return this.orbs.nearest(point, radius);
+  }
+
+  pickFar(hand: number): number {
+    return this.aimed[hand];
+  }
+
+  recall(id: number): void {
+    this.orbs.stick(id, null);
+    this.reeling.add(id);
+    this.music.audio.ui('whoosh');
   }
 
   create(point: Vec3Like): number {
@@ -834,9 +948,18 @@ export class OrblyApp implements DemoHost {
   drag(id: number, point: Vec3Like): void {
     const stage = this.stage;
     if (stage === null) return;
-    const spot = clampToStage(this.scratch.copy(point as Vector3), stage);
-    this.orbs.place(id, spot);
-    const slot = positionToSlot(spot, stage, this.dropSlot);
+    const at = clampToStage(this.scratch.copy(point as Vector3), stage);
+    if (this.reeling.has(id)) {
+      this.orbs.moveTo(id, at);
+      const orb = this.orbs.getPosition(id, this.tetherScratch);
+      if (orb === null || orb.distanceTo(at) < RECALL_DONE_DISTANCE) {
+        this.reeling.delete(id);
+      }
+    } else {
+      this.orbs.place(id, at);
+    }
+    this.orbs.setFade(id, dropZoneAmount(at, stage));
+    const slot = positionToSlot(at, stage, this.dropSlot);
     this.orbs.setBand(id, slot.band);
     const moved = slot.degree !== this.dragSlot.degree ||
       slot.band !== this.dragSlot.band;
@@ -849,24 +972,53 @@ export class OrblyApp implements DemoHost {
   drop(id: number, point: Vec3Like): void {
     const stage = this.stage;
     if (stage === null) return;
-    const spot = clampToStage(this.scratch.copy(point as Vector3), stage);
-    const slot = positionToSlot(spot, stage, this.dropSlot);
+    this.reeling.delete(id);
+    this.orbs.setHeld(id, false);
+    this.orbs.setFade(id, 0);
+    const at = clampToStage(this.scratch.copy(point as Vector3), stage);
+    if (dropZoneAmount(at, stage) >= 1) {
+      // Let go over the lap: the orb is gone, and undo can bring it back.
+      this.freshOrbs.delete(id);
+      this.store.remove(id);
+      this.music.audio.ui('pop');
+      return;
+    }
+    const slot = positionToSlot(at, stage, this.dropSlot);
     const isNew = this.freshOrbs.delete(id);
     const orb = this.store.move(id, slot, !isNew);
-    this.orbs.setHeld(id, false);
     if (orb === null) return;
     if (this.mode === 'tutorial' && !isNew && orb.degree > this.dragStartDegree) {
       this.tutorial.flow.orbRaised();
     }
     this.orbs.setBand(id, orb.band);
+    this.orbs.stick(id, null);
     this.orbs.moveTo(id, slotToPosition(orb, stage, this.scratch));
     this.orbs.pulse(id);
     this.music.sound(orb);
   }
 
-  discard(id: number, velocity: Vec3Like): void {
-    this.orbs.fling(id, velocity);
-    this.store.remove(id);
+  fling(id: number, velocity: Vec3Like): void {
+    const stage = this.stage;
+    if (stage === null) return;
+    const start = this.orbs.getPosition(id, this.scratch);
+    if (start === null) return;
+    this.reeling.delete(id);
+    this.orbs.setFade(id, 0);
+    const { surfaces } = this.room;
+    const aimed = assistAim(velocity, this.head.forward);
+    const plan = planThrow(start, aimed, surfaces, this.eye, stage.floorY);
+    const landing = snapToStep(plan.hit, stage, surfaces);
+    const isNew = this.freshOrbs.delete(id);
+    const orb = this.store.move(
+      id,
+      roomSlot(landing, stage),
+      !isNew,
+      toSpot(landing.point, stage),
+    );
+    if (orb === null) return;
+    this.landings.set(id, landing);
+    this.orbs.setBand(id, orb.band);
+    this.orbs.launch(id, plan);
     this.music.audio.ui('whoosh');
   }
 

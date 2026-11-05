@@ -1,6 +1,12 @@
 /** Editable composition with undo. The single source of truth for orbs. */
 
-import { nearestFreeSlot, Slot } from '../sequencer/mapping';
+import { RoomSpot } from '../room/surfaces';
+import {
+  BAND_COUNT,
+  nearestFreeSlot,
+  Slot,
+  wrapStep,
+} from '../sequencer/mapping';
 import {
   clampBpm,
   Composition,
@@ -92,16 +98,22 @@ export class CompositionStore {
   /**
    * Moves an orb; a no-op (with no undo entry) if the cell does not change.
    * Pass `undoable = false` to fold the move into the previous undo entry,
-   * as for the drag that finishes creating an orb.
+   * as for the drag that finishes creating an orb. `spot` places the orb on a
+   * room surface; leaving it out brings the orb back to the near ring.
    */
-  move(id: number, slot: Slot, undoable = true): OrbData | null {
+  move(
+    id: number,
+    slot: Slot,
+    undoable = true,
+    spot?: RoomSpot,
+  ): OrbData | null {
     const orb = this.find(id);
     if (orb === undefined) return null;
     const free = this.freeSlotFor(slot, id);
     if (free === null) return null;
     if (
       free.step === orb.step && free.degree === orb.degree &&
-      free.band === orb.band
+      free.band === orb.band && spot === orb.spot
     ) {
       return orb;
     }
@@ -109,6 +121,8 @@ export class CompositionStore {
     orb.step = free.step;
     orb.degree = free.degree;
     orb.band = free.band;
+    if (spot === undefined) delete orb.spot;
+    else orb.spot = spot;
     this.changed({ type: 'move', orb });
     return orb;
   }
@@ -127,6 +141,28 @@ export class CompositionStore {
     this.pushUndo();
     this.composition.orbs = [];
     this.changed({ type: 'reset' });
+  }
+
+  /**
+   * Turns the near ring by whole steps, bringing what was behind the user
+   * within reach. Room orbs stay put: they are stuck to the actual room.
+   */
+  rotateRing(steps: number): boolean {
+    const ring = this.composition.orbs.filter((orb) => orb.band < BAND_COUNT);
+    if (ring.length === 0) return false;
+    this.pushUndo();
+    for (const orb of ring) orb.step = wrapStep(orb.step + steps);
+    this.changed({ type: 'reset' });
+    return true;
+  }
+
+  /**
+   * Retunes a room orb to the surface it now sits on. This follows the room
+   * rather than the user, so it is neither undoable nor a change to save.
+   */
+  setRoomBand(id: number, band: number): void {
+    const orb = this.find(id);
+    if (orb !== undefined) orb.band = band;
   }
 
   undo(): boolean {

@@ -1,14 +1,18 @@
 /** The composition document: what gets saved, loaded and undone. */
 
+import { RoomSpot } from '../room/surfaces';
 import {
   BAND_COUNT,
   DEGREE_COUNT,
+  INSTRUMENT_COUNT,
   Slot,
   STEP_COUNT,
 } from '../sequencer/mapping';
 
 export interface OrbData extends Slot {
   id: number;
+  /** Set when the orb lives on a room surface instead of the near ring. */
+  spot?: RoomSpot;
 }
 
 export interface Composition {
@@ -22,7 +26,9 @@ export const MIN_BPM = 60;
 export const MAX_BPM = 140;
 export const DEFAULT_BPM = 84;
 export const SCENE_COUNT = 4;
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
+/** Saves from before orbs could leave the ring still open. */
+const OLDEST_READABLE_VERSION = 1;
 
 export function emptyComposition(): Composition {
   return { bpm: DEFAULT_BPM, sceneId: 0, orbs: [] };
@@ -32,11 +38,38 @@ export function clampBpm(bpm: number): number {
   return Math.max(MIN_BPM, Math.min(MAX_BPM, Math.round(bpm)));
 }
 
+/** step, degree, band; then, for room orbs, azimuth, elevation, distance. */
+type SerializedOrb = number[];
+
 interface SerializedComposition {
   v: number;
   b: number;
   s: number;
-  o: [number, number, number][];
+  o: SerializedOrb[];
+}
+
+/** Milliradians and centimetres: plenty of precision, far fewer digits. */
+function spotToJSON(spot: RoomSpot): number[] {
+  return [
+    Math.round(spot.azimuth * 1000),
+    Math.round(spot.elevation * 1000),
+    Math.round(spot.distance * 100),
+  ];
+}
+
+function spotFromJSON(entry: unknown[]): RoomSpot | null {
+  const [azimuth, elevation, distance] = entry.slice(3);
+  if (
+    !Number.isFinite(azimuth) || !Number.isFinite(elevation) ||
+    !Number.isFinite(distance) || (distance as number) <= 0
+  ) {
+    return null;
+  }
+  return {
+    azimuth: (azimuth as number) / 1000,
+    elevation: (elevation as number) / 1000,
+    distance: (distance as number) / 100,
+  };
 }
 
 export function toJSON(composition: Composition): SerializedComposition {
@@ -44,7 +77,12 @@ export function toJSON(composition: Composition): SerializedComposition {
     v: FORMAT_VERSION,
     b: composition.bpm,
     s: composition.sceneId,
-    o: composition.orbs.map((orb) => [orb.step, orb.degree, orb.band]),
+    o: composition.orbs.map((orb) => [
+      orb.step,
+      orb.degree,
+      orb.band,
+      ...(orb.spot === undefined ? [] : spotToJSON(orb.spot)),
+    ]),
   };
 }
 
@@ -65,7 +103,13 @@ function isCellIndex(value: unknown, size: number): value is number {
 export function parseComposition(data: unknown): Composition | null {
   if (typeof data !== 'object' || data === null) return null;
   const source = data as Partial<SerializedComposition>;
-  if (source.v !== FORMAT_VERSION || !Array.isArray(source.o)) return null;
+  const { v: version } = source;
+  if (
+    typeof version !== 'number' || version < OLDEST_READABLE_VERSION ||
+    version > FORMAT_VERSION || !Array.isArray(source.o)
+  ) {
+    return null;
+  }
 
   const seen = new Set<number>();
   const orbs: OrbData[] = [];
@@ -76,14 +120,22 @@ export function parseComposition(data: unknown): Composition | null {
     if (
       !isCellIndex(step, STEP_COUNT) ||
       !isCellIndex(degree, DEGREE_COUNT) ||
-      !isCellIndex(band, BAND_COUNT)
+      !isCellIndex(band, INSTRUMENT_COUNT)
     ) {
       continue;
     }
+    const spot = band < BAND_COUNT ? undefined : spotFromJSON(entry);
+    if (spot === null) continue;
     const key = step + degree * STEP_COUNT + band * STEP_COUNT * DEGREE_COUNT;
     if (seen.has(key)) continue;
     seen.add(key);
-    orbs.push({ id: orbs.length + 1, step, degree, band });
+    orbs.push({
+      id: orbs.length + 1,
+      step,
+      degree,
+      band,
+      ...(spot === undefined ? {} : { spot }),
+    });
   }
 
   const bpm = typeof source.b === 'number' && Number.isFinite(source.b)

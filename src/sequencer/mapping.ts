@@ -41,7 +41,10 @@ export const STEP_COUNT = 16;
 /** Two pentatonic octaves plus the top root. */
 export const DEGREE_COUNT = 11;
 export const DEGREE_HEIGHT = 0.07;
+/** Instruments on the near ring: pluck, pad, bass. */
 export const BAND_COUNT = 3;
+/** Ring instruments plus the ones that live on room surfaces. */
+export const INSTRUMENT_COUNT = 8;
 /** Rest radius of each band. All of them fit the ~60 cm seated reach. */
 export const BAND_RADII: readonly number[] = [0.27, 0.4, 0.53];
 /** Boundaries between bands. */
@@ -52,6 +55,10 @@ export const MAX_RADIUS = 0.62;
 export const BASE_BELOW_HEAD = 0.6;
 /** Pinches further below degree 0 than this are hands at rest, not intent. */
 export const CREATE_MARGIN_BELOW = 0.1;
+/** An orb let go this far below degree 0 falls into the lap and is deleted. */
+export const DROP_ZONE_BELOW = 0.09;
+/** How far an orb can be dragged down, past the drop line. */
+const DRAG_FLOOR_BELOW = 0.22;
 
 const TAU = Math.PI * 2;
 
@@ -173,8 +180,14 @@ export function clampToStage<T extends Vec3Like>(p: T, stage: Stage): T {
     p.z = stage.z + (dz / radius) * MIN_RADIUS;
   }
   const top = stage.baseY + (DEGREE_COUNT - 1) * DEGREE_HEIGHT;
-  p.y = Math.max(stage.baseY - 0.03, Math.min(top + 0.03, p.y));
+  p.y = Math.max(stage.baseY - DRAG_FLOOR_BELOW, Math.min(top + 0.03, p.y));
   return p;
+}
+
+/** 0 above the lap, rising to 1 at the point where letting go deletes. */
+export function dropZoneAmount(p: Vec3Like, stage: Stage): number {
+  const depth = stage.baseY - p.y;
+  return Math.max(0, Math.min(1, depth / DROP_ZONE_BELOW));
 }
 
 /** True when a pinch here is plausibly meant to create something. */

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Vec3Like } from '../sequencer/mapping';
 import {
+  AIM_DWELL,
+  AimDwell,
   createHandJoints,
   HandJoints,
   Handedness,
@@ -191,6 +193,38 @@ describe('PalmUpDetector', () => {
   });
 });
 
+describe('AimDwell', () => {
+  const hold = (aim: AimDwell, id: number, seconds: number) => {
+    let result = -1;
+    for (let t = 0; t < seconds; t += DT) result = aim.update(id, DT);
+    return result;
+  };
+
+  it('ignores a hand just passing over an orb', () => {
+    expect(hold(new AimDwell(), 3, AIM_DWELL * 0.5)).toBe(-1);
+  });
+
+  it('accepts a hand that keeps pointing', () => {
+    expect(hold(new AimDwell(), 3, AIM_DWELL * 1.5)).toBe(3);
+  });
+
+  it('starts over when the hand moves to another orb', () => {
+    const aim = new AimDwell();
+    hold(aim, 3, AIM_DWELL * 1.5);
+    expect(hold(aim, 4, AIM_DWELL * 0.5)).toBe(-1);
+  });
+
+  it('lets go at once when the hand stops pointing', () => {
+    const aim = new AimDwell();
+    hold(aim, 3, AIM_DWELL * 1.5);
+    expect(aim.update(-1, DT)).toBe(-1);
+  });
+
+  it('never reports pointing at nothing', () => {
+    expect(hold(new AimDwell(), -1, 5)).toBe(-1);
+  });
+});
+
 describe('VelocityTracker', () => {
   it('measures a steady hand speed', () => {
     const tracker = new VelocityTracker();
@@ -218,7 +252,14 @@ describe('GrabController', () => {
   class FakeHost implements OrbHost {
     log: string[] = [];
     orbs = new Map<number, Vec3Like>();
+    far = -1;
     private nextId = 1;
+    pickFar(): number {
+      return this.far;
+    }
+    recall(id: number): void {
+      this.log.push(`recall ${id}`);
+    }
     pick(point: Vec3Like, radius: number): number {
       for (const [id, orb] of this.orbs) {
         if (Math.hypot(orb.x - point.x, orb.y - point.y, orb.z - point.z) <= radius) {
@@ -239,12 +280,13 @@ describe('GrabController', () => {
     drag(id: number, point: Vec3Like): void {
       this.orbs.set(id, { ...point });
     }
-    drop(id: number): void {
+    dropped: Vec3Like | null = null;
+    drop(id: number, point: Vec3Like): void {
+      this.dropped = { ...point };
       this.log.push(`drop ${id}`);
     }
-    discard(id: number): void {
-      this.orbs.delete(id);
-      this.log.push(`discard ${id}`);
+    fling(id: number): void {
+      this.log.push(`fling ${id}`);
     }
     setHover(_hand: number, id: number): void {
       this.log.push(`hover ${id}`);
@@ -279,6 +321,32 @@ describe('GrabController', () => {
     expect(host.log.some((line) => line.startsWith('create'))).toBe(false);
   });
 
+  it('calls back the orb the hand points at instead of creating one', () => {
+    const { host, grab } = setup();
+    host.far = 7;
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
+    expect(host.log).toContain('recall 7');
+    expect(host.log).toContain('begin 7');
+    expect(host.log.some((line) => line.startsWith('create'))).toBe(false);
+    expect(grab.held).toBe(7);
+  });
+
+  it('prefers an orb within reach over one it points at', () => {
+    const { host, grab } = setup();
+    host.far = 7;
+    host.orbs.set(9, { x: 0, y: 1, z: -0.3 });
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
+    expect(host.log).toContain('begin 9');
+    expect(host.log).not.toContain('recall 7');
+  });
+
+  it('lights up the far orb before the pinch, as a promise of what it takes', () => {
+    const { host, grab } = setup();
+    host.far = 7;
+    grab.update({ x: 0, y: 1, z: -0.3 }, open, true, 0, DT);
+    expect(host.log).toEqual(['hover 7']);
+  });
+
   it('shows hover before contact and clears it on grab', () => {
     const { host, grab } = setup();
     host.orbs.set(9, { x: 0, y: 1, z: -0.3 });
@@ -299,7 +367,7 @@ describe('GrabController', () => {
     expect(grab.held).toBe(-1);
   });
 
-  it('discards the orb on a fast release', () => {
+  it('throws the orb on a fast release', () => {
     const { host, grab } = setup();
     grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
     const speed = THROW_SPEED * 1.5;
@@ -307,7 +375,7 @@ describe('GrabController', () => {
       const x = i * DT * speed;
       grab.update({ x, y: 1, z: -0.3 }, i === 24 ? end : hold, true, i * DT, DT);
     }
-    expect(host.log.at(-1)).toBe('discard 1');
+    expect(host.log.at(-1)).toBe('fling 1');
   });
 
   it('reads the speed from when the fingers parted, not from the edge', () => {
@@ -330,7 +398,35 @@ describe('GrabController', () => {
       grab.update({ x, y: 1, z: -0.3 }, parting, true, t, DT);
     }
     grab.update({ x, y: 1, z: -0.3 }, end, true, t + DT, DT);
-    expect(host.log.at(-1)).toBe('discard 1');
+    expect(host.log.at(-1)).toBe('fling 1');
+  });
+
+  it('drops the orb where it was before the fingers parted', () => {
+    const { host, grab } = setup();
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
+    for (let i = 1; i < 30; i++) {
+      grab.update({ x: 0, y: 1, z: -0.3 }, hold, true, i * DT, DT);
+    }
+    grab.update({ x: 0, y: 1.05, z: -0.3 }, parting, true, 30 * DT, DT);
+    grab.update({ x: 0, y: 1.06, z: -0.3 }, parting, true, 31 * DT, DT);
+    grab.update({ x: 0, y: 1.07, z: -0.3 }, end, true, 32 * DT, DT);
+    expect(host.dropped?.y).toBeCloseTo(1);
+    expect(host.orbs.get(1)?.y).toBeCloseTo(1);
+  });
+
+  it('measures the throw on the steady point, not the jumping pinch', () => {
+    const { host, grab } = setup();
+    const still = { x: 0, y: 1, z: -0.3 };
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT, still);
+    let t = 0;
+    for (let i = 1; i <= 16; i++) {
+      t = i * DT;
+      grab.update({ x: 0, y: 1, z: -0.3 }, hold, true, t, DT, still);
+    }
+    // Fingers open: the midpoint between them leaps, but the hand has not moved.
+    grab.update({ x: 0, y: 1.2, z: -0.3 }, parting, true, t + DT, DT, still);
+    grab.update({ x: 0, y: 1.2, z: -0.3 }, end, true, t + 2 * DT, DT, still);
+    expect(host.log.at(-1)).toBe('drop 1');
   });
 
   it('keeps an orb that was moved fast and let go after stopping', () => {

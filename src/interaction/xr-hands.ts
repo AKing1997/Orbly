@@ -42,6 +42,10 @@ export class HandState {
   readonly pinchPoint: Vec3Like = { x: 0, y: 0, z: 0 };
   /** The fingertip that presses buttons. */
   readonly pokeTip: Vec3Like = { x: 0, y: 0, z: 0 };
+  /** Where the hand points, to reach orbs stuck to the room. */
+  readonly rayOrigin: Vec3Like = { x: 0, y: 0, z: 0 };
+  readonly rayDirection: Vec3Like = { x: 0, y: 0, z: -1 };
+  hasRay = false;
   /** Thumb-to-index distance, or null when it is not known this frame. */
   pinchGap: number | null = null;
   triggerPressed = false;
@@ -54,8 +58,14 @@ export class HandState {
     return this.kind !== 'none';
   }
 
+  /** A point that keeps still as the fingers open, for measuring throws. */
+  get steadyPoint(): Vec3Like {
+    return this.kind === 'hand' ? this.joints.middleMeta : this.pinchPoint;
+  }
+
   reset(): void {
     this.kind = 'none';
+    this.hasRay = false;
     this.pinchGap = null;
     this.triggerPressed = false;
     this.menuPressed = false;
@@ -89,7 +99,26 @@ export class XRHandReader {
       } else if (state.kind === 'none') {
         this.readController(state, source, frame, space);
       }
+      if (state.kind !== 'none') this.readRay(state, source, frame, space);
     }
+  }
+
+  private readRay(
+    state: HandState,
+    source: XRInputSource,
+    frame: XRFrame,
+    space: XRReferenceSpace,
+  ): void {
+    const pose = frame.getPose(source.targetRaySpace, space);
+    if (pose === undefined || pose === null) return;
+    const m = pose.transform.matrix;
+    state.rayOrigin.x = m[12];
+    state.rayOrigin.y = m[13];
+    state.rayOrigin.z = m[14];
+    state.rayDirection.x = -m[8];
+    state.rayDirection.y = -m[9];
+    state.rayDirection.z = -m[10];
+    state.hasRay = true;
   }
 
   clear(): void {

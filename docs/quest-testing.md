@@ -14,6 +14,13 @@ Depura desde el PC conectando el visor por USB con
 - [ ] Las manos se detectan sin tocar los mandos.
 - [ ] Pellizcar crea un orbe a la primera, sin insistir.
 
+## Antes de empezar
+
+Prueba en **al menos tres habitaciones distintas**: los jueces evalúan si
+aguanta "in rooms the developer never tested". Si el Quest no tiene la sala
+escaneada no habrá planos, y los orbes flotarán en la cúpula. No llames a
+`initiateRoomCapture`: IWSDK lo tiene desactivado porque borra anclajes.
+
 ## 2. Manos
 
 Si el pellizco falla o salta solo, ajusta `PINCH_ON_DISTANCE` y
@@ -24,7 +31,12 @@ juntos: es el ajuste con más probabilidades de hacer falta.
 - [ ] Pellizco: 10 de 10 aciertos, sentado, con buena luz.
 - [ ] Con las manos en reposo en el regazo no aparecen orbes.
 - [ ] Arrastrar no suelta el orbe a mitad de camino.
-- [ ] Lanzar borra el orbe, y soltar con calma no (`THROW_SPEED` en `src/interaction/grab.ts`).
+- [ ] Lanzar pega el orbe a la superficie, y soltar con calma no lo lanza (`THROW_SPEED` en `src/interaction/grab.ts`).
+- [ ] El orbe cae donde apuntabas. Si no, ajusta `AIM_ASSIST` en `src/room/throw.ts`.
+- [ ] Un lanzamiento corto, sentado, llega a la pared (`SPEED_BOOST` en el mismo archivo).
+- [ ] Apuntar a un orbe lejano muestra el hilo de luz y pellizcar lo trae a la mano.
+- [ ] Pellizcar en el aire mirando un orbe lejano crea uno nuevo, sin traerlo (`AIM_DWELL` en `src/interaction/gestures.ts`).
+- [ ] Bajar un orbe al regazo lo apaga y soltarlo ahí lo borra; deshacer lo recupera.
 - [ ] Oyes cambiar el tono al subir un orbe.
 - [ ] La palma izquierda abre el menú al primer intento y no se abre sola al colocar orbes.
 - [ ] El menú no tiembla y los botones se aciertan con el índice derecho.
@@ -62,8 +74,11 @@ triángulos en el peor caso. Falta el dato real.
 ## 6. Mezcla con la habitación
 
 - [ ] El brillo de los orbes se ve bien con una sala muy iluminada y con poca luz.
-- [ ] Si concedes el permiso de espacio, las paredes y la mesa reciben los pulsos de color.
-- [ ] Si lo deniegas, todo sigue funcionando solo con el anillo.
+- [ ] Si concedes el permiso de espacio, el haz barre las paredes y los impactos dejan ondas de color.
+- [ ] Mesa, suelo, pared y sofá suenan distinto y se identifican bien.
+- [ ] Los orbes quedan sobre la superficie real, sin flotar ni hundirse.
+- [ ] Si deniegas el permiso, los orbes flotan en la cúpula y todo sigue funcionando.
+- [ ] Un bucle guardado en una habitación se abre bien en otra.
 - [ ] El modo estrellas tapa la habitación y vuelve al instante.
 
 ## 7. Pausa y reanudación
@@ -79,6 +94,6 @@ triángulos en el peor caso. Falta el dato real.
 Dásela a alguien que no la conozca y no le expliques nada.
 
 - [ ] En menos de 30 s está haciendo música.
-- [ ] Entiende la mano fantasma sin ayuda.
+- [ ] Entiende la mano fantasma sin ayuda, también al lanzar.
 - [ ] **Saltar** funciona y la segunda vez no vuelve a salir el tutorial.
 - [ ] El reto del día se entiende y celebra al cumplirlo.

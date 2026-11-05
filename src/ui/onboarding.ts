@@ -1,6 +1,6 @@
-/** The three tutorial steps. Pure: the app reports what the user just did. */
+/** The four tutorial steps. Pure: the app reports what the user just did. */
 
-export type TutorialStep = 'pinch' | 'raise' | 'palm' | 'done';
+export type TutorialStep = 'pinch' | 'raise' | 'throw' | 'palm' | 'done';
 
 export class OnboardingFlow {
   private current: TutorialStep = 'pinch';
@@ -11,7 +11,7 @@ export class OnboardingFlow {
 
   /** Step number from 1, for a progress hint. */
   get index(): number {
-    return ['pinch', 'raise', 'palm', 'done'].indexOf(this.current) + 1;
+    return ['pinch', 'raise', 'throw', 'palm', 'done'].indexOf(this.current) + 1;
   }
 
   /** The beam played an orb the user placed. */
@@ -21,16 +21,21 @@ export class OnboardingFlow {
 
   /** An orb was dropped higher than where it started. */
   orbRaised(): boolean {
-    return this.advance('raise', 'palm');
+    return this.advance('raise', 'throw');
+  }
+
+  /** A thrown orb landed on the room. */
+  orbThrown(): boolean {
+    return this.advance('throw', 'palm');
   }
 
   menuOpened(): boolean {
     return this.advance('palm', 'done');
   }
 
-  /** Every orb is gone, so step two has nothing to move. */
+  /** Every orb is gone, so the next steps have nothing to move. */
   orbsGone(): boolean {
-    return this.advance('raise', 'pinch');
+    return this.advance('raise', 'pinch') || this.advance('throw', 'pinch');
   }
 
   skip(): void {

@@ -272,7 +272,7 @@ export class HomeScreen {
       const target = this.targets[saveIndex + 1];
       for (const orb of save.composition.orbs) {
         const angle = stepToAngle(orb.step) + this.spin;
-        const radius = (0.3 + orb.band * 0.28) * target.radius;
+        const radius = (0.3 + Math.min(orb.band, 2) * 0.28) * target.radius;
         center.set(0, 0, 0);
         center.x = target.x + Math.sin(angle) * radius;
         center.z = target.z - Math.cos(angle) * radius;

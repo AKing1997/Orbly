@@ -295,7 +295,8 @@ export class AudioEngine {
     const panner = ctx.createPanner();
     panner.panningModel = 'HRTF';
     panner.distanceModel = 'inverse';
-    panner.refDistance = 0.5;
+    // Orbs on the near ring stay at full level; a far wall is a little softer.
+    panner.refDistance = 1.2;
     panner.rolloffFactor = 0.5;
     this.connectOutputs(panner, 0.2, 0.14);
     this.panners.set(id, panner);
@@ -330,8 +331,23 @@ export class AudioEngine {
       case 1:
         this.pad(note, target);
         break;
-      default:
+      case 2:
         this.bass(note, target);
+        break;
+      case 3:
+        this.bell(note, target);
+        break;
+      case 4:
+        this.marimba(note, target);
+        break;
+      case 5:
+        this.drum(note, target);
+        break;
+      case 6:
+        this.hum(note, target);
+        break;
+      default:
+        this.air(note, target);
         break;
     }
   }
@@ -466,6 +482,155 @@ export class AudioEngine {
       knockAmp.gain.exponentialRampToValueAtTime(0.0001, time + 0.07);
       knock.connect(knockFilter).connect(knockAmp).connect(target);
       knock.start(time, Math.random() * 0.8, 0.09);
+    }
+  }
+
+  /** Walls ring: inharmonic FM with a long, glassy decay. */
+  private bell(note: NoteRequest, target: AudioNode): void {
+    const ctx = this.ctx as AudioContext;
+    const { time } = note;
+    const frequency = midiToFrequency(note.midi);
+    const length = 2.3;
+    const carrier = ctx.createOscillator();
+    carrier.frequency.value = frequency;
+    const modulator = ctx.createOscillator();
+    modulator.frequency.value = frequency * 2.76;
+    const modulation = ctx.createGain();
+    modulation.gain.setValueAtTime(frequency * 1.1, time);
+    modulation.gain.exponentialRampToValueAtTime(frequency * 0.04, time + 0.9);
+    modulator.connect(modulation).connect(carrier.frequency);
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, time);
+    amp.gain.exponentialRampToValueAtTime(0.2 * note.velocity, time + 0.005);
+    amp.gain.exponentialRampToValueAtTime(0.0001, time + length);
+    carrier.connect(amp).connect(target);
+    carrier.start(time);
+    modulator.start(time);
+    carrier.stop(time + length + 0.02);
+    modulator.stop(time + length + 0.02);
+    this.trackVoice(carrier);
+  }
+
+  /** Tables knock: a wooden bar with a bright overtone that dies fast. */
+  private marimba(note: NoteRequest, target: AudioNode): void {
+    const ctx = this.ctx as AudioContext;
+    const { time } = note;
+    const frequency = midiToFrequency(note.midi);
+    const length = 0.62;
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, time);
+    amp.gain.exponentialRampToValueAtTime(0.42 * note.velocity, time + 0.003);
+    amp.gain.exponentialRampToValueAtTime(0.0001, time + length);
+    amp.connect(target);
+    const bar = ctx.createOscillator();
+    bar.frequency.value = frequency;
+    bar.connect(amp);
+    const overtone = ctx.createOscillator();
+    overtone.frequency.value = frequency * 3.93;
+    const overtoneGain = ctx.createGain();
+    overtoneGain.gain.setValueAtTime(0.5, time);
+    overtoneGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+    overtone.connect(overtoneGain).connect(amp);
+    bar.start(time);
+    overtone.start(time);
+    bar.stop(time + length + 0.02);
+    overtone.stop(time + 0.12);
+    this.trackVoice(bar);
+  }
+
+  /** The floor thumps: a soft, tuned drum. */
+  private drum(note: NoteRequest, target: AudioNode): void {
+    const ctx = this.ctx as AudioContext;
+    const { time } = note;
+    const frequency = midiToFrequency(note.midi);
+    const length = 0.48;
+    const body = ctx.createOscillator();
+    body.frequency.setValueAtTime(frequency * 2.4, time);
+    body.frequency.exponentialRampToValueAtTime(frequency, time + 0.07);
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, time);
+    amp.gain.exponentialRampToValueAtTime(0.7 * note.velocity, time + 0.004);
+    amp.gain.exponentialRampToValueAtTime(0.0001, time + length);
+    body.connect(amp).connect(target);
+    body.start(time);
+    body.stop(time + length + 0.02);
+    this.trackVoice(body);
+    if (this.noise !== null) {
+      const skin = ctx.createBufferSource();
+      skin.buffer = this.noise;
+      const tone = ctx.createBiquadFilter();
+      tone.type = 'lowpass';
+      tone.frequency.value = 1100;
+      const skinAmp = ctx.createGain();
+      skinAmp.gain.setValueAtTime(0.16 * note.velocity, time);
+      skinAmp.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+      skin.connect(tone).connect(skinAmp).connect(target);
+      skin.start(time, Math.random() * 0.8, 0.08);
+    }
+  }
+
+  /** Soft furniture hums: a muffled, rounded tone. */
+  private hum(note: NoteRequest, target: AudioNode): void {
+    const ctx = this.ctx as AudioContext;
+    const { time } = note;
+    const frequency = midiToFrequency(note.midi);
+    const length = 1.1;
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 900;
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, time);
+    amp.gain.linearRampToValueAtTime(0.3 * note.velocity, time + 0.03);
+    amp.gain.exponentialRampToValueAtTime(0.0001, time + length);
+    tone.connect(amp).connect(target);
+    const voice = ctx.createOscillator();
+    voice.type = 'triangle';
+    voice.frequency.value = frequency;
+    voice.connect(tone);
+    const body = ctx.createOscillator();
+    body.frequency.value = frequency * 2;
+    const bodyGain = ctx.createGain();
+    bodyGain.gain.value = 0.3;
+    body.connect(bodyGain).connect(tone);
+    voice.start(time);
+    body.start(time);
+    voice.stop(time + length + 0.02);
+    body.stop(time + length + 0.02);
+    this.trackVoice(voice);
+  }
+
+  /** An orb in open air breathes: pitched noise with a slow swell. */
+  private air(note: NoteRequest, target: AudioNode): void {
+    const ctx = this.ctx as AudioContext;
+    const { time } = note;
+    const frequency = midiToFrequency(note.midi);
+    const length = 1.5;
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, time);
+    amp.gain.linearRampToValueAtTime(0.16 * note.velocity, time + 0.1);
+    amp.gain.exponentialRampToValueAtTime(0.0001, time + length);
+    amp.connect(target);
+    const tone = ctx.createOscillator();
+    tone.frequency.value = frequency;
+    const toneGain = ctx.createGain();
+    toneGain.gain.value = 0.55;
+    tone.connect(toneGain).connect(amp);
+    tone.start(time);
+    tone.stop(time + length + 0.02);
+    this.trackVoice(tone);
+    if (this.noise !== null) {
+      const breath = ctx.createBufferSource();
+      breath.buffer = this.noise;
+      breath.loop = true;
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = frequency;
+      band.Q.value = 9;
+      const lift = ctx.createGain();
+      lift.gain.value = 3;
+      breath.connect(band).connect(lift).connect(amp);
+      breath.start(time, Math.random() * 0.8);
+      breath.stop(time + length + 0.02);
     }
   }
 

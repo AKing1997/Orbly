@@ -71,6 +71,17 @@ export const CHALLENGES: readonly Challenge[] = [
       composition.orbs.filter((orb) => orb.degree >= 8).length >= 3,
   },
   {
+    id: 'room-band',
+    text: {
+      en: 'Make 3 kinds of surface sing',
+      es: 'Haz cantar 3 tipos de superficie',
+    },
+    isMet: (composition) =>
+      new Set(
+        composition.orbs.filter((orb) => orb.spot !== undefined).map((orb) => orb.band),
+      ).size >= 3,
+  },
+  {
     id: 'chord',
     text: {
       en: 'Stack a 3-note chord',

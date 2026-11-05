@@ -50,6 +50,32 @@ describe('serialization', () => {
       .toEqual([[0, 4, 0], [8, 2, 2]]);
   });
 
+  it('round-trips an orb stuck to the room', () => {
+    const spot = { azimuth: 1.234, elevation: -0.25, distance: 2.5 };
+    const composition: Composition = {
+      ...sample(),
+      orbs: [{ id: 1, step: 3, degree: 4, band: 3, spot }],
+    };
+    expect(deserialize(serialize(composition))?.orbs[0].spot).toEqual(spot);
+  });
+
+  it('still opens saves from before orbs could leave the ring', () => {
+    const old = JSON.stringify({ v: 1, b: 90, s: 0, o: [[0, 1, 0], [4, 2, 2]] });
+    const restored = deserialize(old);
+    expect(restored?.orbs).toHaveLength(2);
+    expect(restored?.orbs[0].spot).toBeUndefined();
+  });
+
+  it('drops a room orb with no spot, or a broken one', () => {
+    const text = JSON.stringify({
+      v: 2,
+      b: 90,
+      s: 0,
+      o: [[0, 1, 3], [1, 1, 3, 'x', 0, 100], [2, 1, 3, 0, 0, 0], [3, 1, 3, 0, 0, 100]],
+    });
+    expect(deserialize(text)?.orbs.map((orb) => orb.step)).toEqual([3]);
+  });
+
   it('rejects data that is not a composition', () => {
     expect(deserialize('not json')).toBeNull();
     expect(deserialize('null')).toBeNull();
@@ -128,6 +154,54 @@ describe('CompositionStore', () => {
     store.move(orb.id, { step: 1, degree: 2, band: 0 });
     store.undo();
     expect(store.orbs).toHaveLength(0);
+    expect(store.canUndo).toBe(false);
+  });
+
+  it('sticks an orb to the room and brings it back to the ring', () => {
+    const store = new CompositionStore();
+    const orb = store.add({ step: 1, degree: 2, band: 0 }) as OrbData;
+    const spot = { azimuth: 0.4, elevation: 0, distance: 2 };
+    store.move(orb.id, { step: 1, degree: 2, band: 3 }, true, spot);
+    expect(store.find(orb.id)?.spot).toEqual(spot);
+    store.move(orb.id, { step: 5, degree: 2, band: 1 });
+    expect(store.find(orb.id)?.spot).toBeUndefined();
+    store.undo();
+    expect(store.find(orb.id)?.spot).toEqual(spot);
+  });
+
+  it('treats a new spot on the same cell as a real move', () => {
+    const store = new CompositionStore();
+    const orb = store.add({ step: 1, degree: 2, band: 3 }) as OrbData;
+    const spot = { azimuth: 0.4, elevation: 0, distance: 2 };
+    store.move(orb.id, { step: 1, degree: 2, band: 3 }, true, spot);
+    expect(store.find(orb.id)?.spot).toEqual(spot);
+  });
+
+  it('rotates the ring and leaves room orbs where they are', () => {
+    const store = new CompositionStore();
+    const ring = store.add({ step: 14, degree: 2, band: 0 }) as OrbData;
+    const wall = store.add({ step: 3, degree: 2, band: 3 }) as OrbData;
+    store.rotateRing(4);
+    expect(store.find(ring.id)?.step).toBe(2);
+    expect(store.find(wall.id)?.step).toBe(3);
+    store.undo();
+    expect(store.find(ring.id)?.step).toBe(14);
+  });
+
+  it('has nothing to rotate with an empty ring', () => {
+    const store = new CompositionStore();
+    store.add({ step: 3, degree: 2, band: 3 });
+    expect(store.rotateRing(4)).toBe(false);
+  });
+
+  it('retunes a room orb without touching undo or saved state', () => {
+    const store = new CompositionStore();
+    const orb = store.add({ step: 3, degree: 2, band: 3 }) as OrbData;
+    const { revision } = store;
+    store.setRoomBand(orb.id, 5);
+    expect(store.find(orb.id)?.band).toBe(5);
+    expect(store.revision).toBe(revision);
+    store.undo();
     expect(store.canUndo).toBe(false);
   });
 
@@ -239,7 +313,7 @@ describe('daily challenge', () => {
 
   it('varies over time and uses every challenge', () => {
     const used = new Set<string>();
-    for (let day = 0; day < 120; day++) {
+    for (let day = 0; day < 200; day++) {
       used.add(challengeFor(new Date(2026, 0, 1 + day)).id);
     }
     expect(used.size).toBe(CHALLENGES.length);
@@ -262,6 +336,13 @@ describe('daily challenge', () => {
     expect(by('chord').isMet(orbs([[3, 0, 0], [3, 1, 0], [3, 2, 0]]))).toBe(true);
     expect(by('high-notes').isMet(orbs([[0, 8, 0], [1, 9, 0], [2, 10, 0]]))).toBe(true);
     expect(by('eight-steps').isMet(orbs([[0, 0, 0], [0, 1, 0]]))).toBe(false);
+    const spot = { azimuth: 0, elevation: 0, distance: 2 };
+    const inRoom = (bands: number[]): Composition => ({
+      ...emptyComposition(),
+      orbs: bands.map((band, i) => ({ id: i, step: i, degree: 0, band, spot })),
+    });
+    expect(by('room-band').isMet(inRoom([3, 4, 5]))).toBe(true);
+    expect(by('room-band').isMet(inRoom([3, 3, 4]))).toBe(false);
     expect(by('bass-line').isMet(orbs([[0, 0, 2], [1, 0, 2], [2, 0, 2], [3, 0, 2]]))).toBe(true);
   });
 });

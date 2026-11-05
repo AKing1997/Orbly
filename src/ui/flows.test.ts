@@ -5,12 +5,14 @@ import { TouchTargets } from './touch';
 const DT = 1 / 72;
 
 describe('OnboardingFlow', () => {
-  it('walks through the three steps in order', () => {
+  it('walks through the four steps in order', () => {
     const flow = new OnboardingFlow();
     expect(flow.step).toBe('pinch');
     expect(flow.orbSounded()).toBe(true);
     expect(flow.step).toBe('raise');
     expect(flow.orbRaised()).toBe(true);
+    expect(flow.step).toBe('throw');
+    expect(flow.orbThrown()).toBe(true);
     expect(flow.step).toBe('palm');
     expect(flow.menuOpened()).toBe(true);
     expect(flow.step).toBe('done');
@@ -19,6 +21,7 @@ describe('OnboardingFlow', () => {
   it('ignores actions that belong to another step', () => {
     const flow = new OnboardingFlow();
     expect(flow.orbRaised()).toBe(false);
+    expect(flow.orbThrown()).toBe(false);
     expect(flow.menuOpened()).toBe(false);
     expect(flow.step).toBe('pinch');
   });
@@ -32,6 +35,14 @@ describe('OnboardingFlow', () => {
   it('returns to step one when every orb is gone', () => {
     const flow = new OnboardingFlow();
     flow.orbSounded();
+    expect(flow.orbsGone()).toBe(true);
+    expect(flow.step).toBe('pinch');
+  });
+
+  it('also goes back from the throw step when no orb is left', () => {
+    const flow = new OnboardingFlow();
+    flow.orbSounded();
+    flow.orbRaised();
     expect(flow.orbsGone()).toBe(true);
     expect(flow.step).toBe('pinch');
   });

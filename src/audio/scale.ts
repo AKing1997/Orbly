@@ -6,8 +6,12 @@
 /** Major pentatonic, in semitones above the root. */
 export const PENTATONIC: readonly number[] = [0, 2, 4, 7, 9];
 
-/** Root note of each band: pluck, pad, bass. */
-export const BAND_ROOT_MIDI: readonly number[] = [60, 48, 36];
+/**
+ * Root note of each instrument: pluck, pad, bass, then the room's bell (walls),
+ * marimba (tables), drum (floor), hum (soft furniture) and air (no surface).
+ * All are a C, so every instrument shares one key.
+ */
+export const BAND_ROOT_MIDI: readonly number[] = [60, 48, 36, 72, 60, 36, 48, 60];
 
 /** Semitones above the root for a scale degree of any size. */
 export function degreeToSemitones(degree: number): number {
