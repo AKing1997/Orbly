@@ -105,8 +105,8 @@ export class PalmMenu {
     weight: 400,
   });
   private readonly goal = new Label({
-    lineHeight: 0.0125,
-    width: 1400,
+    lineHeight: 0.0145,
+    width: 1500,
     height: 72,
     weight: 400,
     plate: true,

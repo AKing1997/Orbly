@@ -1,25 +1,30 @@
 /** Wires input, state, sound and visuals together, once per frame. */
 
 import { Group, Vector3, World } from '@iwsdk/core';
-import { PalmUpDetector, PinchDetector } from '../interaction/gestures';
+import { PalmUpDetector, PinchDetector, PinchEdges } from '../interaction/gestures';
 import { GrabController, OrbHost } from '../interaction/grab';
 import { HandState, XRHandReader } from '../interaction/xr-hands';
 import {
   canCreateAt,
   clampToStage,
   makeStage,
+  polarToPosition,
   positionToSlot,
   Slot,
   slotToPosition,
   Stage,
   Vec3Like,
 } from '../sequencer/mapping';
-import { MAX_ORBS } from '../state/composition';
+import { challengeFor, dateKey } from '../state/challenge';
+import { emptyComposition, MAX_ORBS } from '../state/composition';
+import { browserStorage, Library, Progress } from '../state/storage';
 import { CompositionStore, StoreEvent } from '../state/store';
+import { HomeScreen } from '../ui/home';
 import { EntryOverlay } from '../ui/overlay';
 import { MenuAction, PalmMenu } from '../ui/palm-menu';
-import { t } from '../ui/strings';
+import { locale, t } from '../ui/strings';
 import { Toast } from '../ui/toast';
+import { TutorialView } from '../ui/tutorial';
 import { Backdrop } from '../visuals/backdrop';
 import { Beam } from '../visuals/beam';
 import { OrbField } from '../visuals/orbs';
@@ -31,7 +36,10 @@ import { BEAT_FLASH, Music } from './music';
 import { SessionLifecycle } from './session';
 import { HeadPose } from './stage-pose';
 
+type Mode = 'idle' | 'home' | 'tutorial' | 'play';
+
 const MAX_DT = 0.1;
+const CELEBRATION_CHORD = [72, 76, 79, 84];
 const MAX_PARTICLES = 360;
 const BPM_STEP = 4;
 const QUARTER_TURN = Math.PI / 2;
@@ -47,8 +55,13 @@ export class OrblyApp implements OrbHost {
   readonly orbs = new OrbField(MAX_ORBS + 12);
   readonly music: Music;
   readonly menu = new PalmMenu();
+  readonly home = new HomeScreen();
+  readonly tutorial = new TutorialView();
+  readonly library: Library;
+  readonly progress: Progress;
 
   stage: Stage | null = null;
+  mode: Mode = 'idle';
 
   private readonly beam = new Beam();
   private readonly ring = new FloorRing();
@@ -75,9 +88,24 @@ export class OrblyApp implements OrbHost {
   private yawTarget = 0;
   private controllerMenuOpen = false;
   private menuButtonWasDown = false;
+  private menuWasOpen = false;
+  private readonly edges: PinchEdges[] = [];
+  private readonly tips: (Vec3Like | null)[] = [null, null];
+  private readonly pinchPoints: Vec3Like[];
+  private readonly pinchStarts = [false, false];
+  /** The library entry being edited, or null for a loop not yet saved. */
+  private saveId: number | null = null;
+  private savedRevision = 0;
+  private dragStartDegree = 0;
+  private readonly challenge = challengeFor(new Date());
+  private readonly challengeKey = dateKey(new Date());
 
   constructor(private readonly world: World) {
     this.head = new HeadPose(world);
+    const storage = browserStorage();
+    this.library = new Library(storage);
+    this.progress = new Progress(storage);
+    this.pinchPoints = [this.hands.left.pinchPoint, this.hands.right.pinchPoint];
     this.music = new Music(this.store, (id) => this.isHeld(id));
     this.grabs = [new GrabController(0, this), new GrabController(1, this)];
 
@@ -91,11 +119,15 @@ export class OrblyApp implements OrbHost {
       this.orbs.object,
       this.particles.object,
       this.menu.object,
+      this.home.object,
+      this.tutorial.object,
       this.toast.object,
     );
     this.menu.onAction = (action) => this.onMenuAction(action);
     this.menu.setTempo(this.store.bpm);
-    this.menu.setGoal('', false);
+    this.updateGoal();
+    this.home.onPick = (index) => this.openFromHome(index);
+    this.tutorial.onSkip = () => this.finishTutorial(false);
     this.orbs.onFlingEnd = (x, y, z, band) => {
       this.particles.burst(x, y, z, this.palette.instruments[band], {
         count: 26,
@@ -135,16 +167,15 @@ export class OrblyApp implements OrbHost {
     const stage = this.stage;
     if (stage === null) return;
 
+    this.readPinches(delta);
     this.updateStageRotation(delta);
-    this.updateMenu(delta);
-    this.updateHand(this.hands.left, 0, !this.menu.isOpen, delta, time);
-    this.updateHand(this.hands.right, 1, !this.menu.fingerNear, delta, time);
+    this.updateMode(delta, time);
 
     this.music.clock.tick();
     this.music.drainFlashes((id) => this.flash(id));
     this.music.setListener(this.head.position, this.head.forward, this.head.up);
 
-    const target = this.music.paused ? 0.35 : 1;
+    const target = this.mode === 'home' ? 0.15 : this.music.paused ? 0.35 : 1;
     this.level += (target - this.level) * (1 - Math.exp(-delta * 3));
     const angle = this.music.beamAngle();
     this.beam.update(angle, stage.yaw, this.head.position, this.level);
@@ -169,6 +200,120 @@ export class OrblyApp implements OrbHost {
     this.root.visible = true;
     this.relocateOrbs();
     this.music.run();
+    if (this.mode === 'idle') this.beginExperience();
+  }
+
+  /** First visit: tutorial. Returning: home, or back to the loop in memory. */
+  private beginExperience(): void {
+    if (!this.progress.onboarded) this.startTutorial();
+    else if (this.store.orbs.length > 0) this.setMode('play');
+    else this.goHome();
+  }
+
+  private setMode(mode: Mode): void {
+    this.mode = mode;
+    if (mode !== 'home') this.home.hide();
+    if (mode === 'home') this.music.clock.stop();
+    else if (!this.music.paused) this.music.run();
+    this.beam.object.visible = mode !== 'home';
+  }
+
+  private startTutorial(): void {
+    if (this.stage === null) return;
+    this.setMode('tutorial');
+    this.tutorial.start(this.stage);
+  }
+
+  private finishTutorial(completed: boolean): void {
+    this.tutorial.stop();
+    this.progress.markOnboarded();
+    this.setMode('play');
+    if (completed) {
+      this.say(t('tutorialDone'));
+      this.celebrate();
+    }
+  }
+
+  private goHome(): void {
+    const stage = this.stage;
+    if (stage === null) return;
+    this.saveIfChanged();
+    this.grabs.forEach((grab) => grab.cancel());
+    this.store.load(emptyComposition());
+    this.saveId = null;
+    this.savedRevision = this.store.revision;
+    this.setMode('home');
+    this.home.show(
+      stage,
+      this.library.list(),
+      this.challenge.text[locale],
+      this.progress.challengeDone(this.challengeKey),
+    );
+  }
+
+  private openFromHome(saveIndex: number): void {
+    const save = this.library.list()[saveIndex];
+    this.calibrate();
+    this.store.load(save?.composition ?? emptyComposition());
+    this.saveId = save?.id ?? null;
+    this.savedRevision = this.store.revision;
+    this.music.setPaused(false);
+    this.menu.setPaused(false);
+    this.music.audio.ui('confirm');
+    this.setMode('play');
+  }
+
+  private saveCurrent(): void {
+    this.saveId = this.library.save(
+      this.store.snapshot(),
+      this.saveId,
+      Date.now(),
+    );
+    this.savedRevision = this.store.revision;
+  }
+
+  /** Never lose work on the way home. */
+  private saveIfChanged(): void {
+    if (this.store.orbs.length === 0) return;
+    if (this.store.revision !== this.savedRevision) this.saveCurrent();
+  }
+
+  private updateGoal(): void {
+    this.menu.setGoal(
+      this.challenge.text[locale],
+      this.progress.challengeDone(this.challengeKey),
+    );
+  }
+
+  private checkChallenge(): void {
+    if (this.mode !== 'play') return;
+    if (this.progress.challengeDone(this.challengeKey)) return;
+    if (!this.challenge.isMet(this.store.snapshot())) return;
+    this.progress.markChallengeDone(this.challengeKey);
+    this.updateGoal();
+    this.say(t('challengeDone'));
+    this.celebrate();
+  }
+
+  /** A ring of sparks around the user and a rising chord. */
+  private celebrate(): void {
+    const stage = this.stage;
+    if (stage === null) return;
+    const y = this.head.position.y - 0.25;
+    for (let i = 0; i < 16; i++) {
+      polarToPosition((i / 16) * Math.PI * 2, 0.55, stage, this.eventScratch);
+      this.particles.burst(
+        this.eventScratch.x,
+        y,
+        this.eventScratch.z,
+        this.palette.instruments[i % 3],
+        { count: 7, speed: 0.42, size: 0.012, life: 1.1, lift: 0.8 },
+      );
+    }
+    const { audio } = this.music;
+    CELEBRATION_CHORD.forEach((note, index) => {
+      setTimeout(() => audio.playCentered(note, 0, 0.7), index * 70);
+    });
   }
 
   private enter(): void {
@@ -197,6 +342,10 @@ export class OrblyApp implements OrbHost {
     this.pinches.forEach((pinch) => pinch.reset());
     this.palm.reset();
     this.menu.setOpen(false, this.head.position, this.head.position);
+    this.saveIfChanged();
+    this.tutorial.stop();
+    this.home.hide();
+    this.mode = 'idle';
     this.music.halt();
     this.room.clear();
     this.stage = null;
@@ -222,13 +371,16 @@ export class OrblyApp implements OrbHost {
           slotToPosition(event.orb, stage, this.eventScratch);
           this.music.audio.setOrbPosition(event.orb.id, this.eventScratch);
         }
+        this.checkChallenge();
         break;
       case 'remove':
         this.orbs.dissolve(event.orb.id);
         this.music.audio.releaseOrb(event.orb.id);
+        this.onOrbsChanged();
         break;
       case 'reset':
         this.relocateOrbs();
+        this.onOrbsChanged();
         break;
       case 'bpm':
         this.music.setBpm(event.bpm);
@@ -237,6 +389,13 @@ export class OrblyApp implements OrbHost {
       case 'scene':
         this.applyPalette();
         break;
+    }
+  }
+
+  private onOrbsChanged(): void {
+    this.checkChallenge();
+    if (this.mode === 'tutorial' && this.store.orbs.length === 0) {
+      this.tutorial.flow.orbsGone();
     }
   }
 
@@ -270,6 +429,7 @@ export class OrblyApp implements OrbHost {
     this.ring.setPalette(this.palette);
     this.backdrop.setPalette(this.palette);
     this.menu.setAccent(this.palette);
+    this.tutorial.setPalette(this.palette);
   }
 
   private flash(id: number): void {
@@ -281,6 +441,9 @@ export class OrblyApp implements OrbHost {
     this.orbs.pulse(id);
     const orb = this.store.find(id);
     if (orb === undefined) return;
+    if (this.mode === 'tutorial' && this.tutorial.flow.orbSounded()) {
+      this.tutorial.setOrbSpot(slotToPosition(orb, this.stage as Stage, this.eventScratch));
+    }
     this.room.pulse(this.palette.instruments[orb.band], 0.8);
     if (this.orbs.getPosition(id, this.scratch) !== null) {
       const { x, y, z } = this.scratch;
@@ -309,6 +472,43 @@ export class OrblyApp implements OrbHost {
     this.relocateOrbs();
   }
 
+  private readPinches(dt: number): void {
+    const { left, right } = this.hands;
+    for (let index = 0; index < 2; index++) {
+      const hand = index === 0 ? left : right;
+      const pinch = this.pinches[index];
+      const edges = hand.kind === 'controller'
+        ? pinch.updateButton(hand.triggerPressed, dt)
+        : pinch.update(hand.pinchGap, dt);
+      this.edges[index] = edges;
+      this.pinchStarts[index] = edges.started;
+      this.tips[index] = hand.tracked ? hand.pokeTip : null;
+    }
+  }
+
+  private updateMode(dt: number, time: number): void {
+    const { left, right } = this.hands;
+    const headPosition = this.head.position;
+    if (this.mode === 'home') {
+      this.home.update(this.tips, this.pinchPoints, this.pinchStarts, headPosition, dt);
+      this.updateHand(left, 0, false, dt, time);
+      this.updateHand(right, 1, false, dt, time);
+      return;
+    }
+    this.home.update(this.tips, this.pinchPoints, this.pinchStarts, headPosition, dt);
+    this.updateMenu(dt);
+    let leftFree = !this.menu.isOpen;
+    let rightFree = !this.menu.fingerNear;
+    if (this.mode === 'tutorial') {
+      this.tutorial.update(this.tips, this.pinchPoints, this.pinchStarts, headPosition, dt);
+      if (this.mode !== 'tutorial') return;
+      leftFree = leftFree && !this.tutorial.isNearSkip(left.pinchPoint);
+      rightFree = rightFree && !this.tutorial.isNearSkip(right.pinchPoint);
+    }
+    this.updateHand(left, 0, leftFree, dt, time);
+    this.updateHand(right, 1, rightFree, dt, time);
+  }
+
   private updateMenu(dt: number): void {
     const { left, right } = this.hands;
     const head = this.head.position;
@@ -330,6 +530,10 @@ export class OrblyApp implements OrbHost {
     this.menuButtonWasDown = left.menuPressed;
     this.menu.setOpen(open, anchor, head);
     this.menu.update(anchor, head, right.tracked ? right.pokeTip : null, dt);
+    if (open && !this.menuWasOpen && this.mode === 'tutorial') {
+      if (this.tutorial.flow.menuOpened()) this.finishTutorial(true);
+    }
+    this.menuWasOpen = open;
   }
 
   private onMenuAction(action: MenuAction): void {
@@ -369,7 +573,16 @@ export class OrblyApp implements OrbHost {
         this.setBackdrop(!this.backdrop.enabled);
         break;
       case 'save':
+        if (this.store.orbs.length === 0) {
+          audio.ui('error');
+        } else {
+          this.saveCurrent();
+          audio.ui('confirm');
+          this.say(t('saved'));
+        }
+        break;
       case 'home':
+        this.goHome();
         break;
     }
   }
@@ -382,7 +595,8 @@ export class OrblyApp implements OrbHost {
   }
 
   private say(text: string): void {
-    this.toast.show(text, this.head.position, this.head.forward);
+    const near = this.menu.isOpen ? this.menu.object.position : null;
+    this.toast.show(text, this.head.position, this.head.forward, near);
   }
 
   private updateHand(
@@ -392,13 +606,9 @@ export class OrblyApp implements OrbHost {
     dt: number,
     time: number,
   ): void {
-    const pinch = this.pinches[index];
-    const edges = hand.kind === 'controller'
-      ? pinch.updateButton(hand.triggerPressed, dt)
-      : pinch.update(hand.pinchGap, dt);
     this.grabs[index].update(
       hand.tracked ? hand.pinchPoint : null,
-      edges,
+      this.edges[index],
       enabled,
       time,
       dt,
@@ -435,6 +645,7 @@ export class OrblyApp implements OrbHost {
   beginDrag(id: number): void {
     this.orbs.setHeld(id, true);
     this.dragSlot.step = -1;
+    this.dragStartDegree = this.store.find(id)?.degree ?? 0;
     this.pulseHaptics(this.grabs[0].held === id ? 0 : 1, 0.5, 20);
   }
 
@@ -458,9 +669,13 @@ export class OrblyApp implements OrbHost {
     if (stage === null) return;
     const spot = clampToStage(this.scratch.copy(point as Vector3), stage);
     const slot = positionToSlot(spot, stage, this.dropSlot);
-    const orb = this.store.move(id, slot, !this.freshOrbs.delete(id));
+    const isNew = this.freshOrbs.delete(id);
+    const orb = this.store.move(id, slot, !isNew);
     this.orbs.setHeld(id, false);
     if (orb === null) return;
+    if (this.mode === 'tutorial' && !isNew && orb.degree > this.dragStartDegree) {
+      this.tutorial.flow.orbRaised();
+    }
     this.orbs.setBand(id, orb.band);
     this.orbs.moveTo(id, slotToPosition(orb, stage, this.scratch));
     this.orbs.pulse(id);
