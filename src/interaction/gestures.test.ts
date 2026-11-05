@@ -4,6 +4,9 @@ import {
   AIM_DWELL,
   AimDwell,
   createHandJoints,
+  LISTEN_AFTER,
+  ListeningDetector,
+  ListeningHand,
   HandJoints,
   Handedness,
   palmNormal,
@@ -222,6 +225,105 @@ describe('AimDwell', () => {
 
   it('never reports pointing at nothing', () => {
     expect(hold(new AimDwell(), -1, 5)).toBe(-1);
+  });
+});
+
+describe('ListeningDetector', () => {
+  const REST_Y = 0.7;
+  const none: ListeningHand = { position: null, pinching: false };
+  const held = (y: number, pinching = false): ListeningHand => ({
+    position: { x: 0.2, y, z: -0.3 },
+    pinching,
+  });
+
+  /** Feeds the same hands, optionally drifting, for a while. */
+  const run = (
+    detector: ListeningDetector,
+    seconds: number,
+    hand: (t: number) => ListeningHand,
+    allowed = true,
+  ) => {
+    let result = false;
+    for (let t = 0; t < seconds; t += DT) {
+      result = detector.update([hand(t), none], REST_Y, allowed, DT);
+    }
+    return result;
+  };
+  const waving = (t: number) => held(1.0 + Math.sin(t * 8) * 0.1);
+
+  it('starts when the hands drop out of tracking', () => {
+    const detector = new ListeningDetector();
+    expect(run(detector, LISTEN_AFTER * 0.9, () => none)).toBe(false);
+    expect(run(detector, LISTEN_AFTER * 0.2, () => none)).toBe(true);
+  });
+
+  it('starts when the hands rest on the lap, even if they fidget', () => {
+    const detector = new ListeningDetector();
+    const fidgeting = (t: number) => held(0.55 + Math.sin(t * 8) * 0.05);
+    expect(run(detector, LISTEN_AFTER * 1.1, fidgeting)).toBe(true);
+  });
+
+  it('starts for hands held perfectly still in the air', () => {
+    const detector = new ListeningDetector();
+    expect(run(detector, LISTEN_AFTER * 1.1, () => held(1.0))).toBe(true);
+  });
+
+  it('ignores the tiny jitter of hand tracking', () => {
+    const detector = new ListeningDetector();
+    const jitter = (t: number) => held(1.0 + Math.sin(t * 70) * 0.0003);
+    expect(run(detector, LISTEN_AFTER * 1.1, jitter)).toBe(true);
+  });
+
+  it('never starts while a hand is playing', () => {
+    const detector = new ListeningDetector();
+    expect(run(detector, LISTEN_AFTER * 2, waving)).toBe(false);
+  });
+
+  it('restarts the wait after any movement', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 0.8, () => none);
+    run(detector, 0.4, waving);
+    expect(run(detector, LISTEN_AFTER * 0.8, () => none)).toBe(false);
+  });
+
+  it('ends when a hand comes up and moves', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 1.1, () => none);
+    expect(run(detector, 0.4, waving)).toBe(false);
+  });
+
+  it('ends at once on a pinch, even low down', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 1.1, () => none);
+    expect(detector.update([held(0.5, true), none], REST_Y, true, DT)).toBe(false);
+  });
+
+  it('survives a brief twitch', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 1.1, () => held(1.0));
+    expect(run(detector, 0.04, (t) => held(1.0 + t))).toBe(true);
+  });
+
+  it('does not wake for a hand reappearing on the lap', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 1.1, () => none);
+    expect(run(detector, 1, (t) => held(0.5 + t * 0.05))).toBe(true);
+  });
+
+  it('stops and resets when not allowed', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 1.1, () => none);
+    expect(run(detector, 0.1, () => none, false)).toBe(false);
+    expect(run(detector, LISTEN_AFTER * 0.5, () => none)).toBe(false);
+  });
+
+  it('watches both hands', () => {
+    const detector = new ListeningDetector();
+    run(detector, LISTEN_AFTER * 1.1, () => none);
+    for (let t = 0; t < 0.4; t += DT) {
+      detector.update([none, waving(t)], REST_Y, true, DT);
+    }
+    expect(detector.isListening).toBe(false);
   });
 });
 

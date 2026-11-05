@@ -10,6 +10,7 @@ const orbs: OrbData[] = [
 ];
 
 const source = {
+  orbs,
   orbsAtStep(step: number, out: OrbData[]) {
     out.length = 0;
     out.push(...orbs.filter((orb) => orb.step === step));
@@ -30,7 +31,7 @@ function setup(muted: number[] = []) {
 describe('Sequencer', () => {
   it('plays each orb on its step, in tune, at the scheduled time', () => {
     const { notes, sequencer } = setup();
-    expect(sequencer.step(0, 3.5)).toBe(2);
+    expect(sequencer.step(0, 3.5, 0.3)).toBe(2);
     expect(notes[0]).toMatchObject({
       orbId: 1,
       midi: degreeToMidi(2, 0),
@@ -41,13 +42,13 @@ describe('Sequencer', () => {
 
   it('stays quiet on an empty step', () => {
     const { notes, sequencer } = setup();
-    expect(sequencer.step(9, 0)).toBe(0);
+    expect(sequencer.step(9, 0, 0.3)).toBe(0);
     expect(notes).toHaveLength(0);
   });
 
   it('skips an orb that is being held', () => {
     const { notes, sequencer } = setup([1]);
-    sequencer.step(0, 0);
+    sequencer.step(0, 0, 0.3);
     expect(notes.map((note) => note.orbId)).toEqual([2]);
   });
 

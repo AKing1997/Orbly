@@ -23,6 +23,7 @@ export interface DemoHost extends OrbHost {
   clearAll(): void;
   menuAction(action: MenuAction): void;
   setStarfield(on: boolean): void;
+  setConcert(on: boolean): void;
   setCamera(position: Vector3, target: Vector3): void;
   orbAt(slot: Slot): number;
 }
@@ -247,10 +248,10 @@ export class DemoDirector {
       this.moveCamera(MENU_SHOT, 1.8),
       this.hold(11),
       this.moveCamera(RAISED, 6),
-      this.moveCamera(LOW_ORBIT, 13),
-      this.moveCamera(HIGH_ORBIT, 16),
+      this.moveCamera(LOW_ORBIT, 18),
+      this.moveCamera(HIGH_ORBIT, 24),
       this.moveCamera(POV, 6),
-      this.hold(14),
+      this.hold(5),
       this.moveCamera(OPENING, 7),
       this.hold(4),
     ];
@@ -323,16 +324,21 @@ export class DemoDirector {
         end: () => this.host.addOrb(slot),
       });
     }
-    segments.push(wait(12));
+    segments.push(wait(3));
+    // Hands down: the lights fall and orbly takes over the song.
+    segments.push({ duration: 0, end: () => this.host.setConcert(true) });
+    segments.push(wait(14));
     segments.push({ duration: 0, end: () => this.host.menuAction('scene') });
-    segments.push(wait(9));
+    segments.push(wait(14));
+    segments.push({ duration: 0, end: () => this.host.setConcert(false) });
+    segments.push(wait(4));
     segments.push({
       duration: 0,
       end: () => this.host.setStarfield(true),
     });
-    segments.push(wait(9));
+    segments.push(wait(8));
     segments.push({ duration: 0, end: () => this.host.menuAction('scene') });
-    segments.push(wait(9));
+    segments.push(wait(8));
     segments.push(wait(3));
     segments.push({
       duration: 1.2,

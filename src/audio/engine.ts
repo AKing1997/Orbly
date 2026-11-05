@@ -14,6 +14,12 @@ const REVERB_SECONDS = 2.2;
 const PANNER_RELEASE_SECONDS = 4;
 /** Upper bound of simultaneously sounding voices; extra notes are skipped. */
 const MAX_VOICES = 28;
+const REVERB_LEVEL = 0.32;
+const DELAY_FEEDBACK = 0.34;
+/** Time constant of concert mode's slow changes, in seconds. */
+const AMBIENCE_GLIDE = 1.1;
+/** High enough to take the filter out of the sound. */
+export const OPEN_BRIGHTNESS = 19000;
 
 export type UiSound = 'tick' | 'confirm' | 'error' | 'pop' | 'whoosh';
 
@@ -24,8 +30,8 @@ interface NoteRequest {
   /** Seconds in one step, so note lengths follow the tempo. */
   stepDuration: number;
   velocity: number;
-  /** Panner to play through; null plays dead centre. */
-  panner: PannerNode | null;
+  /** Where the voice goes: an orb's panner, or null for dead centre. */
+  panner: AudioNode | null;
 }
 
 type AudioContextClass = typeof AudioContext;
@@ -44,6 +50,12 @@ export class AudioEngine {
   private reverbSend: GainNode | null = null;
   private delaySend: GainNode | null = null;
   private delay: DelayNode | null = null;
+  /** Everything passes through this, so concert mode can open and close it. */
+  private brightness: BiquadFilterNode | null = null;
+  private reverbReturn: GainNode | null = null;
+  private delayFeedback: GainNode | null = null;
+  /** Backing notes: wide and wet, with no place of their own in the room. */
+  private ambient: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private readonly panners = new Map<number, PannerNode>();
   private activeVoices = 0;
@@ -101,6 +113,33 @@ export class AudioEngine {
       Math.min(1.9, seconds),
       this.ctx.currentTime,
       0.05,
+    );
+  }
+
+  /** Deepens the space around the music: 0 is dry, 1 is a concert hall. */
+  setAmbience(amount: number): void {
+    const ctx = this.ctx;
+    if (ctx === null) return;
+    const now = ctx.currentTime;
+    this.reverbReturn?.gain.setTargetAtTime(
+      REVERB_LEVEL + 0.3 * amount,
+      now,
+      AMBIENCE_GLIDE,
+    );
+    this.delayFeedback?.gain.setTargetAtTime(
+      DELAY_FEEDBACK + 0.12 * amount,
+      now,
+      AMBIENCE_GLIDE,
+    );
+  }
+
+  /** Slowly opens or closes the top end of everything, in hertz. */
+  setBrightness(hertz: number): void {
+    if (this.ctx === null) return;
+    this.brightness?.frequency.setTargetAtTime(
+      hertz,
+      this.ctx.currentTime,
+      AMBIENCE_GLIDE,
     );
   }
 
@@ -165,6 +204,24 @@ export class AudioEngine {
     });
   }
 
+  /** Schedules a backing note, which comes from no place in the room. */
+  playBacking(
+    midi: number,
+    band: number,
+    time: number,
+    stepDuration: number,
+    velocity: number,
+  ): void {
+    this.play({
+      midi,
+      band,
+      time,
+      stepDuration,
+      velocity,
+      panner: this.ambient,
+    });
+  }
+
   /** Plays a note with no orb behind it, as in the menu chords. */
   playCentered(midi: number, band: number, velocity: number): void {
     if (this.ctx === null) return;
@@ -225,20 +282,29 @@ export class AudioEngine {
     out.gain.value = 0.9;
     compressor.connect(out).connect(ctx.destination);
 
+    this.brightness = ctx.createBiquadFilter();
+    this.brightness.type = 'lowpass';
+    this.brightness.frequency.value = OPEN_BRIGHTNESS;
+    this.brightness.Q.value = 0.4;
+    this.brightness.connect(compressor);
+
     this.dry = ctx.createGain();
-    this.dry.connect(compressor);
+    this.dry.connect(this.brightness);
 
     const convolver = ctx.createConvolver();
     convolver.buffer = this.makeImpulse(ctx);
-    const reverbGain = ctx.createGain();
-    reverbGain.gain.value = 0.32;
+    this.reverbReturn = ctx.createGain();
+    this.reverbReturn.gain.value = REVERB_LEVEL;
     this.reverbSend = ctx.createGain();
-    this.reverbSend.connect(convolver).connect(reverbGain).connect(compressor);
+    this.reverbSend
+      .connect(convolver)
+      .connect(this.reverbReturn)
+      .connect(this.brightness);
 
     this.delay = ctx.createDelay(2);
     this.delay.delayTime.value = 0.5;
-    const feedback = ctx.createGain();
-    feedback.gain.value = 0.34;
+    this.delayFeedback = ctx.createGain();
+    this.delayFeedback.gain.value = DELAY_FEEDBACK;
     const tone = ctx.createBiquadFilter();
     tone.type = 'bandpass';
     tone.frequency.value = 1400;
@@ -247,9 +313,13 @@ export class AudioEngine {
     delayGain.gain.value = 0.3;
     this.delaySend = ctx.createGain();
     this.delaySend.connect(this.delay);
-    this.delay.connect(tone).connect(feedback).connect(this.delay);
-    tone.connect(delayGain).connect(compressor);
+    this.delay.connect(tone).connect(this.delayFeedback).connect(this.delay);
+    tone.connect(delayGain).connect(this.brightness);
     tone.connect(this.reverbSend);
+
+    this.ambient = ctx.createGain();
+    this.ambient.gain.value = 0.8;
+    this.connectOutputs(this.ambient, 0.5, 0.18);
 
     this.noise = this.makeNoise(ctx);
 

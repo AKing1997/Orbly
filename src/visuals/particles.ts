@@ -10,8 +10,13 @@ import {
   Points,
   ShaderMaterial,
 } from '@iwsdk/core';
+import { Vec3Like } from '../sequencer/mapping';
 import { lightMaterial } from './materials';
 import { Rgb } from './palettes';
+
+const COMET_SPARKS = 6;
+/** The vertex shader eases motion, covering this share of the path by the end. */
+const ARRIVAL_EASING = 0.55;
 
 export interface BurstOptions {
   count: number;
@@ -131,6 +136,31 @@ export class Particles {
       this.births[p] = this.time;
       this.births[p + 1] = life * (0.6 + Math.random() * 0.4);
       this.births[p + 2] = size * (0.6 + Math.random() * 0.6);
+    }
+    for (const attribute of this.attributes) attribute.needsUpdate = true;
+  }
+
+  /** A small comet of sparks flying from one point to another. */
+  comet(from: Vec3Like, to: Vec3Like, color: Rgb, life: number): void {
+    for (let i = 0; i < COMET_SPARKS; i++) {
+      const index = this.cursor;
+      this.cursor = (this.cursor + 1) % this.capacity;
+      const p = index * 3;
+      // The trail: later sparks start a moment behind and travel the same way.
+      const spread = life * (1 - i * 0.09);
+      const speed = 1 / (spread * ARRIVAL_EASING);
+      this.positions[p] = from.x;
+      this.positions[p + 1] = from.y;
+      this.positions[p + 2] = from.z;
+      this.velocities[p] = (to.x - from.x) * speed;
+      this.velocities[p + 1] = (to.y - from.y) * speed;
+      this.velocities[p + 2] = (to.z - from.z) * speed;
+      this.colors[p] = color[0];
+      this.colors[p + 1] = color[1];
+      this.colors[p + 2] = color[2];
+      this.births[p] = this.time;
+      this.births[p + 1] = spread;
+      this.births[p + 2] = 0.011 * (1 - i * 0.12);
     }
     for (const attribute of this.attributes) attribute.needsUpdate = true;
   }

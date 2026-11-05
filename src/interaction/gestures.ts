@@ -326,3 +326,107 @@ export class AimDwell {
     this.time = 0;
   }
 }
+
+/** Seconds of stillness before concert mode begins. */
+export const LISTEN_AFTER = 9;
+/** A hand must move faster than this to count as playing again, in m/s. */
+const STILL_SPEED = 0.1;
+const SPEED_SMOOTHING = 0.15;
+/** A brief twitch does not end the music. */
+const WAKE_DWELL = 0.1;
+
+export interface ListeningHand {
+  /** A steady point on the hand, or null when it is not tracked. */
+  position: Vec3Like | null;
+  pinching: boolean;
+}
+
+interface HandMotion {
+  x: number;
+  y: number;
+  z: number;
+  known: boolean;
+  speed: number;
+}
+
+/**
+ * Notices when the user has sat back. Hands that are out of tracking, resting
+ * on the lap, or simply still all count as listening, so nothing has to be
+ * learned: lower your hands and the concert starts. Any hand that comes up and
+ * moves ends it at once.
+ */
+export class ListeningDetector {
+  private readonly motion: HandMotion[] = [
+    { x: 0, y: 0, z: 0, known: false, speed: 0 },
+    { x: 0, y: 0, z: 0, known: false, speed: 0 },
+  ];
+  private quiet = 0;
+  private waking = 0;
+  private listening = false;
+
+  get isListening(): boolean {
+    return this.listening;
+  }
+
+  /**
+   * @param restY hands below this height are resting, however they move.
+   * @param allowed false while something else needs the user's attention.
+   */
+  update(
+    hands: readonly ListeningHand[],
+    restY: number,
+    allowed: boolean,
+    dt: number,
+  ): boolean {
+    let active = false;
+    let pinching = false;
+    hands.forEach((hand, index) => {
+      pinching = pinching || hand.pinching;
+      if (this.isPlaying(hand, this.motion[index], restY, dt)) active = true;
+    });
+
+    if (!allowed) {
+      this.reset();
+      return false;
+    }
+    if (this.listening) {
+      this.waking = active ? this.waking + dt : 0;
+      if (pinching || this.waking >= WAKE_DWELL) this.reset();
+    } else if (active || pinching) {
+      this.quiet = 0;
+    } else {
+      this.quiet += dt;
+      if (this.quiet >= LISTEN_AFTER) this.listening = true;
+    }
+    return this.listening;
+  }
+
+  reset(): void {
+    this.listening = false;
+    this.quiet = 0;
+    this.waking = 0;
+  }
+
+  private isPlaying(
+    hand: ListeningHand,
+    motion: HandMotion,
+    restY: number,
+    dt: number,
+  ): boolean {
+    if (hand.position === null) {
+      motion.known = false;
+      motion.speed = 0;
+      return false;
+    }
+    const { x, y, z } = hand.position;
+    if (motion.known && dt > 0) {
+      const speed = Math.hypot(x - motion.x, y - motion.y, z - motion.z) / dt;
+      motion.speed += (speed - motion.speed) * Math.min(1, dt / SPEED_SMOOTHING);
+    }
+    motion.x = x;
+    motion.y = y;
+    motion.z = z;
+    motion.known = true;
+    return y >= restY && motion.speed >= STILL_SPEED;
+  }
+}

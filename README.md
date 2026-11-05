@@ -33,6 +33,12 @@ Throw an orb and the room takes over:
 
 An orb's colour shows its instrument. It flashes on the note you hear.
 
+**Sit back for a concert.** Lower your hands and, after a few seconds, the house
+lights go down. orbly takes your song and turns it into a piece: chords, bass and
+a soft pulse appear around it, layers enter and leave in sections, and the melody
+draws itself across the dark room. Even a single orb becomes music. Your song
+itself never changes, and raising a hand brings it straight back.
+
 **Your room remembers your song.** The first orb to land pins the song to a
 persistent anchor. Come back to the same room and it is already on your walls,
 exactly where you left it, wherever you sit. Open it in another room and the
@@ -109,7 +115,7 @@ every push to `main`. In the repository, set **Settings → Pages → Source** t
 
 ```
 src/audio/        Web Audio engine, pentatonic scale, lookahead step clock
-src/sequencer/    Pure radial mapping (position -> step, note, instrument)
+src/sequencer/    Pure radial mapping and the concert arranger
 src/interaction/  Pure gesture detection: pinch, grab, throw, aim, palm-up
 src/room/         Pure room model: surfaces, raycasts, throw flight, room memory
 src/visuals/      Instanced orbs, beam, floor ring, particles, room pulses

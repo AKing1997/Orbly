@@ -16,7 +16,7 @@ const STRINGS = {
     tutorialRaise: 'Move an orb higher',
     tutorialThrow: 'Throw an orb at your room',
     tutorialPalm: 'Turn your left palm up',
-    tutorialDone: 'You are making music',
+    tutorialDone: 'Now lower your hands and listen',
     skip: 'Skip',
     newLoop: 'New',
     today: "Today's challenge",
@@ -25,6 +25,7 @@ const STRINGS = {
     full: 'That is all the orbs',
     challengeDone: 'Challenge complete!',
     roomRemembered: 'Your room remembered your song',
+    concertHint: 'Raise a hand to play again',
     paused: 'Paused',
   },
   es: {
@@ -40,7 +41,7 @@ const STRINGS = {
     tutorialRaise: 'Mueve un orbe más arriba',
     tutorialThrow: 'Lanza un orbe a tu habitación',
     tutorialPalm: 'Gira la palma izquierda',
-    tutorialDone: 'Ya estás haciendo música',
+    tutorialDone: 'Ahora baja las manos y escucha',
     skip: 'Saltar',
     newLoop: 'Nuevo',
     today: 'Reto de hoy',
@@ -49,6 +50,7 @@ const STRINGS = {
     full: 'No caben más orbes',
     challengeDone: '¡Reto completado!',
     roomRemembered: 'Tu habitación recordó tu canción',
+    concertHint: 'Levanta una mano para volver a tocar',
     paused: 'En pausa',
   },
 } as const;

@@ -29,22 +29,25 @@ passes. Its angle sets when it plays and its height sets the note, always on a
 pentatonic scale, so nothing can sound wrong. Point at a far orb to call it back
 to your hand, or keep some on a ring within reach.
 
-Your room remembers. Come back tomorrow and your song is already on your walls,
-exactly where you left it. Open it somewhere else and it lands on that room's
-surfaces instead, as a different band.
+Then sit back. Lower your hands and the house lights fall: chords and a soft
+pulse grow around your song, sections rise and ebb, and the melody draws itself
+across the dark room. Raise a hand and it is yours again.
+
+Your room remembers. Come back tomorrow and your song is still on your walls.
+Open it somewhere else and it lands on that room's surfaces instead, as a
+different band.
 
 ### How I built it
 
 orbly runs in the browser on the Immersive Web SDK and WebXR, in TypeScript.
 Detected planes become a model of the room: throws are simulated ahead of time
 against it, then snapped to the beat so the beam meets each orb exactly as it
-sounds. A single persistent anchor pins each song to its room. All audio is synthesized live, with eight instruments, a generated reverb
-and HRTF spatialization per orb. There are no samples.
+sounds. A persistent anchor pins each song to its room. All audio is synthesized live, with eight instruments and HRTF spatialization
+per orb. There are no samples.
 
 Rendering stays small for a standalone headset: orbs are instanced and the room's
-light is a single merged mesh. The musical logic, the room model and the gestures
-have no rendering code, and run under more than 150 unit tests on simulated hands
-and rooms.
+light is a single merged mesh. The logic runs under more than 200 unit tests on
+simulated hands and rooms.
 
 ### Challenges
 
@@ -64,8 +67,7 @@ towards your gaze, and a hand resting on your lap that never does anything.
 
 ### What's next
 
-A lean-back concert mode, and sharing a song by link, so it lands in a friend's
-room as their own band.
+Sharing a song by link, so it lands in a friend's room as their own band.
 
 ## How hand interactions are implemented
 
@@ -97,5 +99,9 @@ panel nearly stops following your palm as your finger approaches.
 
 **Delete** is letting go over your lap: the orb fades as you lower it, as a
 warning, and undo brings it back.
+
+**Listening.** Hands that are still, resting or out of tracking for nine seconds
+start the concert, so there is nothing to learn. Any hand that rises and moves
+ends it within a fraction of a second.
 
 Controllers work but are never required.

@@ -11,6 +11,8 @@ import {
 } from '@iwsdk/core';
 import {
   AimDwell,
+  ListeningDetector,
+  ListeningHand,
   PalmUpDetector,
   PinchDetector,
   PinchEdges,
@@ -59,6 +61,7 @@ import { Particles } from '../visuals/particles';
 import { FloorRing } from '../visuals/ring';
 import { RoomPulse } from '../visuals/room';
 import { Tether } from '../visuals/tether';
+import { RoomVeil } from '../visuals/veil';
 import { DemoDirector, DemoHost } from './demo';
 import { BEAT_FLASH, Music } from './music';
 import { SessionLifecycle } from './session';
@@ -101,6 +104,13 @@ const RECALL_DONE_DISTANCE = 0.08;
 const MEMORY_CHECK_INTERVAL = 0.25;
 /** How long to look for a song in this room before leaving the user at home. */
 const ROOM_SEARCH_SECONDS = 6;
+/** Hands lower than this above the lowest note are resting. */
+const REST_LINE_ABOVE_BASE = 0.05;
+/** How far the house lights go down: the room stays faintly visible. */
+const CONCERT_DARKNESS = 0.68;
+const CONCERT_FADE_IN = 0.9;
+const CONCERT_FADE_OUT = 5;
+const COMET_LIFE = 0.5;
 const XR_PIXELS_PER_UNIT = 820;
 const XR_STAR_SCALE = 2;
 const SESSION_START_TIMEOUT = 12000;
@@ -126,6 +136,19 @@ export class OrblyApp implements DemoHost {
   private readonly particles = new Particles(MAX_PARTICLES);
   private readonly room = new RoomPulse();
   private readonly tethers = [new Tether(), new Tether()];
+  private readonly veil = new RoomVeil();
+  private readonly listening = new ListeningDetector();
+  private readonly listeningHands: ListeningHand[] = [
+    { position: null, pinching: false },
+    { position: null, pinching: false },
+  ];
+  /** 0 with the lights up, 1 in full concert. */
+  private concertLevel = 0;
+  private concertHintShown = false;
+  private demoConcert = false;
+  /** The last orb that sounded in concert, where the next comet starts. */
+  private readonly lastFlash = new Vector3();
+  private hasLastFlash = false;
   private readonly anchorBackend = new XRAnchorBackend();
   private readonly memory = new RoomMemory(this.anchorBackend);
   /** The anchor pinning the current song to this room, if it has one. */
@@ -208,6 +231,7 @@ export class OrblyApp implements DemoHost {
     this.root.visible = false;
     this.root.add(
       this.backdrop.object,
+      this.veil.object,
       this.room.object,
       this.ring.object,
       this.beam.object,
@@ -291,6 +315,7 @@ export class OrblyApp implements DemoHost {
     this.updateMode(delta, time);
     this.updateTethers();
     this.updateRoomMemory(stage, delta);
+    this.updateConcert(stage, delta);
 
     this.music.clock.tick();
     this.music.drainFlashes((id) => this.flash(id));
@@ -301,11 +326,14 @@ export class OrblyApp implements DemoHost {
     const target = this.mode === 'home' ? 0.15 : this.music.paused ? 0.35 : 1;
     this.level += (target - this.level) * (1 - Math.exp(-delta * 3));
     const angle = this.music.beamAngle();
-    this.beam.update(angle, stage.yaw, this.head.position, this.level);
+    // In concert the light rises and falls with the music.
+    const glow = this.level *
+      (1 + this.concertLevel * (0.2 + this.music.concertEnergy * 0.9));
+    this.beam.update(angle, stage.yaw, this.head.position, glow);
     this.ring.update(angle, delta, this.level);
     this.beat *= Math.exp(-delta * 5);
     this.backdrop.update(this.head.position, this.beat, delta);
-    this.room.update(frame, space, this.eye, angle - stage.yaw, this.level, delta);
+    this.room.update(frame, space, this.eye, angle - stage.yaw, glow, delta);
     this.orbs.update(delta);
     this.particles.update(delta);
     this.toast.update(delta);
@@ -346,6 +374,44 @@ export class OrblyApp implements DemoHost {
       this.lookingForSong = true;
       this.searchTime = 0;
     }
+  }
+
+  /** Sits back when the hands do, and hands the loop back when they rise. */
+  private updateConcert(stage: Stage, dt: number): void {
+    const { left, right } = this.hands;
+    const [leftHand, rightHand] = this.listeningHands;
+    leftHand.position = left.tracked ? left.steadyPoint : null;
+    leftHand.pinching = this.pinches[0].isActive;
+    rightHand.position = right.tracked ? right.steadyPoint : null;
+    rightHand.pinching = this.pinches[1].isActive;
+
+    const allowed = this.mode === 'play' && !this.music.paused &&
+      this.store.orbs.length > 0 && !this.menu.isOpen &&
+      this.grabs[0].held < 0 && this.grabs[1].held < 0;
+    const listening = this.mode === 'demo'
+      ? this.demoConcert
+      : this.listening.update(
+        this.listeningHands,
+        stage.baseY + REST_LINE_ABOVE_BASE,
+        allowed,
+        dt,
+      );
+
+    if (listening !== this.music.inConcert) {
+      this.music.setConcert(listening, Math.floor(Math.random() * 1e6));
+      this.hasLastFlash = false;
+      if (listening && !this.concertHintShown && this.mode !== 'demo') {
+        this.concertHintShown = true;
+        this.say(t('concertHint'));
+      }
+    }
+
+    const rate = listening ? CONCERT_FADE_IN : CONCERT_FADE_OUT;
+    const target = listening ? 1 : 0;
+    this.concertLevel += (target - this.concertLevel) * (1 - Math.exp(-dt * rate));
+    // The starfield is already dark, and opaque: there is nothing to dim.
+    const darkness = this.backdrop.enabled ? 0 : this.concertLevel * CONCERT_DARKNESS;
+    this.veil.update(this.eye, darkness);
   }
 
   /** Follows the song's anchor, and finds the song that belongs to this room. */
@@ -624,6 +690,10 @@ export class OrblyApp implements DemoHost {
     this.memory.reset();
     this.anchorBackend.endSession();
     this.songStage = null;
+    this.listening.reset();
+    this.music.setConcert(false, 0);
+    this.concertLevel = 0;
+    this.veil.update(this.eye, 0);
     this.music.halt();
     this.room.clear();
     this.stage = null;
@@ -766,6 +836,7 @@ export class OrblyApp implements DemoHost {
     this.ring.setPalette(this.palette);
     this.backdrop.setPalette(this.palette);
     this.room.setBeamColor(this.palette.beam);
+    this.veil.setColor(this.palette.skyBottom);
     this.menu.setAccent(this.palette);
     this.tutorial.setPalette(this.palette);
   }
@@ -784,10 +855,19 @@ export class OrblyApp implements DemoHost {
       this.tutorial.setOrbSpot(this.eventScratch);
     }
     const color = this.palette.instruments[orb.band];
-    if (orb.spot === undefined) this.room.pulse(color, 0.8, this.eye);
+    const wave = 0.8 + this.concertLevel * 0.9;
+    if (orb.spot === undefined) this.room.pulse(color, wave, this.eye);
     if (this.orbs.getPosition(id, this.scratch) !== null) {
       const { x, y, z } = this.scratch;
-      if (orb.spot !== undefined) this.room.pulse(color, 0.8, this.scratch);
+      if (orb.spot !== undefined) this.room.pulse(color, wave, this.scratch);
+      if (this.music.inConcert) {
+        // The melody draws itself in the air, from each note to the next.
+        if (this.hasLastFlash) {
+          this.particles.comet(this.lastFlash, this.scratch, color, COMET_LIFE);
+        }
+        this.lastFlash.copy(this.scratch);
+        this.hasLastFlash = true;
+      }
       this.particles.burst(x, y, z, this.palette.instruments[orb.band], {
         count: 6,
         speed: 0.16,
@@ -940,6 +1020,10 @@ export class OrblyApp implements DemoHost {
 
   menuAction(action: MenuAction): void {
     this.onMenuAction(action);
+  }
+
+  setConcert(on: boolean): void {
+    this.demoConcert = on;
   }
 
   setStarfield(on: boolean): void {

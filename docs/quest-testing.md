@@ -95,7 +95,21 @@ decir: si reconoce la habitación de verdad, y cuánto tarda.
 - [ ] Un orbe lanzado allí fija la canción a esa habitación.
 - [ ] Sin permiso de espacio, o en navegación privada, todo funciona sin memoria.
 
-## 8. Pausa y reanudación
+## 8. Modo concierto
+
+Tampoco se ha escuchado nunca: es lo primero que debes oír.
+
+- [ ] Con las manos en el regazo, el concierto empieza a los 9 s sin hacer nada (`LISTEN_AFTER` en `src/interaction/gestures.ts`).
+- [ ] No salta mientras piensas qué hacer con la mano quieta en el aire, o molesta poco si salta.
+- [ ] Rascarte o mover la mano un poco en el regazo no lo corta.
+- [ ] Levantar la mano lo corta al instante y vuelve tu bucle tal cual.
+- [ ] Los acordes y el bajo suenan bien con tus orbes, no por encima de ellos.
+- [ ] Las secciones se notan: empieza tranquilo, crece y cae.
+- [ ] La sala se oscurece lo justo y los orbes y paredes destacan (`CONCERT_DARKNESS` en `src/app/app.ts`).
+- [ ] Con un solo orbe, ya suena a pieza completa.
+- [ ] Sin cortes de audio en pleno concierto con muchos orbes.
+
+## 9. Pausa y reanudación
 
 - [ ] El menú del sistema pausa el sonido y el haz.
 - [ ] Al volver, todo sigue donde estaba, sin ráfagas de notas.
@@ -103,11 +117,12 @@ decir: si reconoce la habitación de verdad, y cuánto tarda.
 - [ ] Salir y volver a entrar conserva el bucle.
 - [ ] Cerrar el navegador y reabrirlo muestra los guardados en Inicio.
 
-## 9. Primera experiencia
+## 10. Primera experiencia
 
 Dásela a alguien que no la conozca y no le expliques nada.
 
 - [ ] En menos de 30 s está haciendo música.
 - [ ] Entiende la mano fantasma sin ayuda, también al lanzar.
+- [ ] Al acabar el tutorial baja las manos y le sorprende el concierto.
 - [ ] **Saltar** funciona y la segunda vez no vuelve a salir el tutorial.
 - [ ] El reto del día se entiende y celebra al cumplirlo.

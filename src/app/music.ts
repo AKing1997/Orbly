@@ -1,9 +1,10 @@
 /** The sound side of the app: engine, clock and sequencer working together. */
 
-import { AudioEngine } from '../audio/engine';
+import { AudioEngine, OPEN_BRIGHTNESS } from '../audio/engine';
 import { StepClock } from '../audio/clock';
 import { degreeToMidi } from '../audio/scale';
-import { FlashQueue, NoteEvent, Sequencer } from '../sequencer/player';
+import { ConcertArranger } from '../sequencer/concert';
+import { FlashQueue, NO_ORB, NoteEvent, Sequencer } from '../sequencer/player';
 import { stepToAngle, Vec3Like } from '../sequencer/mapping';
 import { Slot } from '../sequencer/mapping';
 import { OrbData } from '../state/composition';
@@ -21,6 +22,7 @@ export class Music {
   private readonly sequencer: Sequencer;
   private timer: ReturnType<typeof setInterval> | null = null;
   private userPaused = false;
+  private arranger: ConcertArranger | null = null;
 
   constructor(
     store: CompositionStore,
@@ -36,6 +38,24 @@ export class Music {
 
   get paused(): boolean {
     return this.userPaused;
+  }
+
+  get inConcert(): boolean {
+    return this.arranger !== null;
+  }
+
+  /** How full the concert is right now, 0 to 1. Drives the light. */
+  get concertEnergy(): number {
+    return this.arranger?.section.energy ?? 0;
+  }
+
+  /** Sits back and lets the arranger play, or hands the loop straight back. */
+  setConcert(on: boolean, seed: number): void {
+    if (on === this.inConcert) return;
+    this.arranger = on ? new ConcertArranger(seed) : null;
+    this.sequencer.setArranger(this.arranger);
+    this.audio.setAmbience(on ? 1 : 0);
+    this.audio.setBrightness(OPEN_BRIGHTNESS);
   }
 
   /** Unlocks audio from a user gesture. */
@@ -114,12 +134,26 @@ export class Music {
   }
 
   private onStep(step: number, time: number): void {
-    if (this.sequencer.step(step, time) > 0) {
-      this.flashes.push(BEAT_FLASH, time);
+    const played = this.sequencer.step(step, time, this.clock.stepDuration);
+    if (played > 0) this.flashes.push(BEAT_FLASH, time);
+    // The sound closes in the quiet sections and opens up at the peak.
+    if (step === 0 && this.arranger !== null) {
+      const energy = this.arranger.section.energy;
+      this.audio.setBrightness(1500 + energy * energy * 13000);
     }
   }
 
   private play(note: Readonly<NoteEvent>): void {
+    if (note.orbId === NO_ORB) {
+      this.audio.playBacking(
+        note.midi,
+        note.band,
+        note.time,
+        this.clock.stepDuration,
+        note.velocity,
+      );
+      return;
+    }
     this.audio.playOrb(
       note.orbId,
       note.midi,
