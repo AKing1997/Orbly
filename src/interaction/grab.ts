@@ -34,6 +34,7 @@ export class GrabController {
   private hoverId = -1;
   private readonly tracker = new VelocityTracker();
   private readonly velocity: Vec3Like = { x: 0, y: 0, z: 0 };
+  private wasOpening = false;
 
   constructor(
     private readonly hand: number,
@@ -70,7 +71,11 @@ export class GrabController {
       this.setHover(-1);
       this.heldFor += dt;
       this.host.drag(this.heldId, point);
-      if (pinch.ended) this.release(point);
+      if (pinch.opening && !this.wasOpening) {
+        this.tracker.velocity(this.velocity);
+      }
+      if (pinch.ended) this.release(point, this.wasOpening);
+      this.wasOpening = pinch.opening;
       return;
     }
 
@@ -88,6 +93,7 @@ export class GrabController {
       if (id >= 0) {
         this.heldId = id;
         this.heldFor = 0;
+        this.wasOpening = false;
         this.setHover(-1);
         this.host.beginDrag(id);
       }
@@ -109,10 +115,13 @@ export class GrabController {
     this.host.drop(id, this.lastPoint);
   }
 
-  private release(point: Vec3Like): void {
+  /** @param measured true when `velocity` was captured as the fingers parted. */
+  private release(point: Vec3Like, measured: boolean): void {
     const id = this.heldId;
     this.heldId = -1;
-    const velocity = this.tracker.velocity(this.velocity);
+    const velocity = measured
+      ? this.velocity
+      : this.tracker.velocity(this.velocity);
     const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
     if (speed >= THROW_SPEED && this.heldFor >= MIN_HOLD_BEFORE_THROW) {
       this.host.discard(id, velocity);

@@ -54,6 +54,12 @@ export interface PinchEdges {
   active: boolean;
   started: boolean;
   ended: boolean;
+  /**
+   * The fingers have parted but the release is still being debounced. Hand
+   * speed must be read from this moment: by the time `ended` fires, a throw
+   * is already over and the hand is slowing down.
+   */
+  opening: boolean;
 }
 
 export class PinchDetector {
@@ -64,7 +70,12 @@ export class PinchDetector {
     active: false,
     started: false,
     ended: false,
+    opening: false,
   };
+
+  get isActive(): boolean {
+    return this.active;
+  }
 
   /**
    * @param gap thumb-to-index distance in metres, or null when untracked.
@@ -74,6 +85,7 @@ export class PinchDetector {
     const { edges } = this;
     edges.started = false;
     edges.ended = false;
+    edges.opening = false;
 
     if (gap === null) {
       this.candidateTime = 0;
@@ -95,6 +107,8 @@ export class PinchDetector {
       if (this.candidateTime >= dwell) {
         this.setActive(!this.active);
         this.candidateTime = 0;
+      } else {
+        edges.opening = this.active;
       }
     } else {
       this.candidateTime = 0;
@@ -115,6 +129,7 @@ export class PinchDetector {
     this.edges.active = false;
     this.edges.started = false;
     this.edges.ended = false;
+    this.edges.opening = false;
   }
 
   private setActive(active: boolean): void {

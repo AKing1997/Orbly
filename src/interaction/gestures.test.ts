@@ -96,6 +96,15 @@ describe('PinchDetector', () => {
     expect(feed(detector, new Array(30).fill(mid)).some(Boolean)).toBe(false);
   });
 
+  it('flags the release while it is being debounced', () => {
+    const detector = new PinchDetector();
+    feed(detector, [0.01, 0.01, 0.01, 0.01]);
+    expect(detector.update(0.06, DT).opening).toBe(true);
+    let edges = detector.update(0.06, DT);
+    while (!edges.ended) edges = detector.update(0.06, DT);
+    expect(edges.opening).toBe(false);
+  });
+
   it('survives a brief tracking loss but lets go after a longer one', () => {
     const detector = new PinchDetector();
     feed(detector, [0.01, 0.01, 0.01, 0.01]);
@@ -242,10 +251,11 @@ describe('GrabController', () => {
     }
   }
 
-  const open = { active: false, started: false, ended: false };
-  const start = { active: true, started: true, ended: false };
-  const hold = { active: true, started: false, ended: false };
-  const end = { active: false, started: false, ended: true };
+  const open = { active: false, started: false, ended: false, opening: false };
+  const start = { active: true, started: true, ended: false, opening: false };
+  const hold = { active: true, started: false, ended: false, opening: false };
+  const parting = { active: true, started: false, ended: false, opening: true };
+  const end = { active: false, started: false, ended: true, opening: false };
 
   const setup = () => {
     const host = new FakeHost();
@@ -298,6 +308,47 @@ describe('GrabController', () => {
       grab.update({ x, y: 1, z: -0.3 }, i === 24 ? end : hold, true, i * DT, DT);
     }
     expect(host.log.at(-1)).toBe('discard 1');
+  });
+
+  it('reads the speed from when the fingers parted, not from the edge', () => {
+    const { host, grab } = setup();
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
+    const speed = THROW_SPEED * 1.5;
+    let x = 0;
+    let t = 0;
+    for (let i = 1; i <= 16; i++) {
+      t = i * DT;
+      x = t * speed;
+      grab.update({ x, y: 1, z: -0.3 }, hold, true, t, DT);
+    }
+    // The fingers part, then the hand stops dead during the debounce.
+    t += DT;
+    x += DT * speed;
+    grab.update({ x, y: 1, z: -0.3 }, parting, true, t, DT);
+    for (let i = 0; i < 12; i++) {
+      t += DT;
+      grab.update({ x, y: 1, z: -0.3 }, parting, true, t, DT);
+    }
+    grab.update({ x, y: 1, z: -0.3 }, end, true, t + DT, DT);
+    expect(host.log.at(-1)).toBe('discard 1');
+  });
+
+  it('keeps an orb that was moved fast and let go after stopping', () => {
+    const { host, grab } = setup();
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
+    let t = 0;
+    for (let i = 1; i <= 16; i++) {
+      t = i * DT;
+      grab.update({ x: t * 3, y: 1, z: -0.3 }, hold, true, t, DT);
+    }
+    const x = t * 3;
+    for (let i = 0; i < 20; i++) {
+      t += DT;
+      grab.update({ x, y: 1, z: -0.3 }, hold, true, t, DT);
+    }
+    grab.update({ x, y: 1, z: -0.3 }, parting, true, t + DT, DT);
+    grab.update({ x, y: 1, z: -0.3 }, end, true, t + 2 * DT, DT);
+    expect(host.log.at(-1)).toBe('drop 1');
   });
 
   it('does not read a jerky tap as a throw', () => {

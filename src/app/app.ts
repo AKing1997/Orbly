@@ -1,7 +1,7 @@
 /** Wires input, state, sound and visuals together, once per frame. */
 
 import { Group, Vector3, World } from '@iwsdk/core';
-import { PinchDetector } from '../interaction/gestures';
+import { PalmUpDetector, PinchDetector } from '../interaction/gestures';
 import { GrabController, OrbHost } from '../interaction/grab';
 import { HandState, XRHandReader } from '../interaction/xr-hands';
 import {
@@ -17,6 +17,9 @@ import {
 import { MAX_ORBS } from '../state/composition';
 import { CompositionStore, StoreEvent } from '../state/store';
 import { EntryOverlay } from '../ui/overlay';
+import { MenuAction, PalmMenu } from '../ui/palm-menu';
+import { t } from '../ui/strings';
+import { Toast } from '../ui/toast';
 import { Beam } from '../visuals/beam';
 import { OrbField } from '../visuals/orbs';
 import { Palette, PALETTES } from '../visuals/palettes';
@@ -28,6 +31,9 @@ import { HeadPose } from './stage-pose';
 
 const MAX_DT = 0.1;
 const MAX_PARTICLES = 360;
+const BPM_STEP = 4;
+const QUARTER_TURN = Math.PI / 2;
+const ROTATE_RATE = 5;
 
 export class OrblyApp implements OrbHost {
   readonly store = new CompositionStore();
@@ -36,13 +42,16 @@ export class OrblyApp implements OrbHost {
   readonly hands = new XRHandReader();
   readonly orbs = new OrbField(MAX_ORBS + 12);
   readonly music: Music;
+  readonly menu = new PalmMenu();
 
   stage: Stage | null = null;
 
   private readonly beam = new Beam();
   private readonly ring = new FloorRing();
   private readonly particles = new Particles(MAX_PARTICLES);
+  private readonly toast = new Toast();
   private readonly overlay: EntryOverlay;
+  private readonly palm = new PalmUpDetector();
   private readonly pinches = [new PinchDetector(), new PinchDetector()];
   private readonly grabs: GrabController[];
   private readonly scratch = new Vector3();
@@ -56,6 +65,9 @@ export class OrblyApp implements OrbHost {
   private palette: Palette = PALETTES[0];
   private inSession = false;
   private level = 0;
+  private yawTarget = 0;
+  private controllerMenuOpen = false;
+  private menuButtonWasDown = false;
 
   constructor(private readonly world: World) {
     this.head = new HeadPose(world);
@@ -69,7 +81,12 @@ export class OrblyApp implements OrbHost {
       this.beam.object,
       this.orbs.object,
       this.particles.object,
+      this.menu.object,
+      this.toast.object,
     );
+    this.menu.onAction = (action) => this.onMenuAction(action);
+    this.menu.setTempo(this.store.bpm);
+    this.menu.setGoal('', false);
     this.orbs.onFlingEnd = (x, y, z, band) => {
       this.particles.burst(x, y, z, this.palette.instruments[band], {
         count: 26,
@@ -109,8 +126,10 @@ export class OrblyApp implements OrbHost {
     const stage = this.stage;
     if (stage === null) return;
 
-    this.updateHand(this.hands.left, 0, delta, time);
-    this.updateHand(this.hands.right, 1, delta, time);
+    this.updateStageRotation(delta);
+    this.updateMenu(delta);
+    this.updateHand(this.hands.left, 0, !this.menu.isOpen, delta, time);
+    this.updateHand(this.hands.right, 1, !this.menu.fingerNear, delta, time);
 
     this.music.clock.tick();
     this.music.drainFlashes((id) => this.flash(id));
@@ -123,6 +142,7 @@ export class OrblyApp implements OrbHost {
     this.ring.update(angle, delta, this.level);
     this.orbs.update(delta);
     this.particles.update(delta);
+    this.toast.update(delta);
   }
 
   /** Fits the grid to the current seat position and heading. */
@@ -131,6 +151,7 @@ export class OrblyApp implements OrbHost {
     if (position.lengthSq() === 0) return;
     const floorY = position.y > 0.6 ? 0 : position.y - 1.15;
     this.stage = makeStage(position, yaw, floorY);
+    this.yawTarget = yaw;
     this.beam.setStage(this.stage);
     this.ring.setStage(this.stage);
     this.root.visible = true;
@@ -161,6 +182,8 @@ export class OrblyApp implements OrbHost {
     this.inSession = false;
     this.grabs.forEach((grab) => grab.cancel());
     this.pinches.forEach((pinch) => pinch.reset());
+    this.palm.reset();
+    this.menu.setOpen(false, this.head.position, this.head.position);
     this.music.halt();
     this.stage = null;
     this.root.visible = false;
@@ -195,6 +218,7 @@ export class OrblyApp implements OrbHost {
         break;
       case 'bpm':
         this.music.setBpm(event.bpm);
+        this.menu.setTempo(event.bpm);
         break;
       case 'scene':
         this.applyPalette();
@@ -230,6 +254,7 @@ export class OrblyApp implements OrbHost {
     this.orbs.setPalette(this.palette);
     this.beam.setColor(this.palette.beam);
     this.ring.setPalette(this.palette);
+    this.menu.setAccent(this.palette);
   }
 
   private flash(id: number): void {
@@ -255,9 +280,89 @@ export class OrblyApp implements OrbHost {
     return this.grabs[0].held === id || this.grabs[1].held === id;
   }
 
+  /** Eases the ring towards its target after the rotate button. */
+  private updateStageRotation(dt: number): void {
+    const stage = this.stage;
+    if (stage === null) return;
+    const remaining = this.yawTarget - stage.yaw;
+    if (Math.abs(remaining) < 1e-4) return;
+    stage.yaw += remaining * (1 - Math.exp(-dt * ROTATE_RATE));
+    if (Math.abs(this.yawTarget - stage.yaw) < 1e-4) stage.yaw = this.yawTarget;
+    this.ring.setStage(stage);
+    this.relocateOrbs();
+  }
+
+  private updateMenu(dt: number): void {
+    const { left, right } = this.hands;
+    const head = this.head.position;
+    let open = false;
+    let anchor: Vec3Like = left.pinchPoint;
+    if (left.kind === 'hand') {
+      const pinching = this.pinches[0].isActive;
+      open = this.palm.update(left.joints, 'left', head, pinching, dt);
+      anchor = left.joints.middleMeta;
+    } else {
+      this.palm.update(null, 'left', head, false, dt);
+      if (left.kind === 'controller') {
+        if (left.menuPressed && !this.menuButtonWasDown) {
+          this.controllerMenuOpen = !this.controllerMenuOpen;
+        }
+        open = this.controllerMenuOpen;
+      }
+    }
+    this.menuButtonWasDown = left.menuPressed;
+    this.menu.setOpen(open, anchor, head);
+    this.menu.update(anchor, head, right.tracked ? right.pokeTip : null, dt);
+  }
+
+  private onMenuAction(action: MenuAction): void {
+    const { audio } = this.music;
+    audio.ui('tick');
+    switch (action) {
+      case 'slower':
+        this.store.setBpm(this.store.bpm - BPM_STEP);
+        break;
+      case 'faster':
+        this.store.setBpm(this.store.bpm + BPM_STEP);
+        break;
+      case 'playPause':
+        this.music.setPaused(!this.music.paused);
+        this.menu.setPaused(this.music.paused);
+        break;
+      case 'undo':
+        if (!this.store.undo()) audio.ui('error');
+        break;
+      case 'rotate':
+        // Brings what was on the user's right to the front.
+        this.yawTarget -= QUARTER_TURN;
+        audio.ui('whoosh');
+        break;
+      case 'scene':
+        this.store.setScene(this.store.sceneId + 1);
+        this.say(this.palette.name);
+        break;
+      case 'clear':
+        if (this.store.orbs.length > 0) {
+          this.store.clear();
+          audio.ui('whoosh');
+          this.say(t('cleared'));
+        }
+        break;
+      case 'backdrop':
+      case 'save':
+      case 'home':
+        break;
+    }
+  }
+
+  private say(text: string): void {
+    this.toast.show(text, this.head.position, this.head.forward);
+  }
+
   private updateHand(
     hand: HandState,
     index: number,
+    enabled: boolean,
     dt: number,
     time: number,
   ): void {
@@ -268,7 +373,7 @@ export class OrblyApp implements OrbHost {
     this.grabs[index].update(
       hand.tracked ? hand.pinchPoint : null,
       edges,
-      true,
+      enabled,
       time,
       dt,
     );
