@@ -131,6 +131,15 @@ describe('CompositionStore', () => {
     expect(store.canUndo).toBe(false);
   });
 
+  it('folds the drag that places a new orb into a single undo', () => {
+    const store = new CompositionStore();
+    const orb = store.add({ step: 1, degree: 2, band: 0 }) as OrbData;
+    store.move(orb.id, { step: 9, degree: 5, band: 1 }, false);
+    expect(store.undo()).toBe(true);
+    expect(store.orbs).toHaveLength(0);
+    expect(store.canUndo).toBe(false);
+  });
+
   it('reports changes to listeners', () => {
     const store = new CompositionStore();
     const events: StoreEvent['type'][] = [];

@@ -206,6 +206,13 @@ export class AudioEngine {
     }
   }
 
+  /** A quiet blip at a pitch, so a dragged orb can be heard changing. */
+  pitchBlip(midi: number): void {
+    if (this.ctx === null) return;
+    const frequency = midiToFrequency(midi);
+    this.blip(this.ctx.currentTime + 0.005, frequency, frequency, 0.07, 0.05, 'sine');
+  }
+
   private build(): void {
     const Context = contextClass();
     if (Context === undefined) return;

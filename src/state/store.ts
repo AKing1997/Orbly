@@ -89,8 +89,12 @@ export class CompositionStore {
     return orb;
   }
 
-  /** Moves an orb; a no-op (with no undo entry) if the cell does not change. */
-  move(id: number, slot: Slot): OrbData | null {
+  /**
+   * Moves an orb; a no-op (with no undo entry) if the cell does not change.
+   * Pass `undoable = false` to fold the move into the previous undo entry,
+   * as for the drag that finishes creating an orb.
+   */
+  move(id: number, slot: Slot, undoable = true): OrbData | null {
     const orb = this.find(id);
     if (orb === undefined) return null;
     const free = this.freeSlotFor(slot, id);
@@ -101,7 +105,7 @@ export class CompositionStore {
     ) {
       return orb;
     }
-    this.pushUndo();
+    if (undoable) this.pushUndo();
     orb.step = free.step;
     orb.degree = free.degree;
     orb.band = free.band;

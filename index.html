@@ -1,16 +1,112 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, shrink-to-fit=no"
     />
+    <meta
+      name="description"
+      content="orbly is a spatial music toy for Meta Quest: place orbs of light around you with your hands."
+    />
+    <meta name="theme-color" content="#05060f" />
     <link rel="icon" href="data:," />
     <title>orbly</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #05060f;
+        color: #eef1ff;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      #scene-container,
+      #scene-container canvas {
+        position: fixed;
+        inset: 0;
+        display: block;
+      }
+      #entry {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 24px;
+        text-align: center;
+        background: radial-gradient(
+          circle at 50% 42%,
+          #1a2150 0%,
+          #0a0d24 45%,
+          #05060f 100%
+        );
+      }
+      #entry[hidden] {
+        display: none;
+      }
+      #entry h1 {
+        margin: 0;
+        font-size: clamp(56px, 11vw, 112px);
+        font-weight: 300;
+        letter-spacing: 0.04em;
+        background: linear-gradient(100deg, #63f5d8, #b48cff 55%, #ff7ac8);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      #entry-tagline {
+        margin: 0;
+        max-width: 30em;
+        font-size: clamp(17px, 2.4vw, 22px);
+        opacity: 0.85;
+      }
+      #entry-button {
+        margin-top: 14px;
+        padding: 16px 40px;
+        border: 0;
+        border-radius: 999px;
+        font: inherit;
+        font-size: 20px;
+        color: #05060f;
+        background: linear-gradient(100deg, #63f5d8, #b48cff);
+        box-shadow: 0 0 34px rgba(99, 245, 216, 0.4);
+        cursor: pointer;
+      }
+      #entry-button:focus-visible {
+        outline: 3px solid #fff;
+        outline-offset: 3px;
+      }
+      #entry-button:disabled {
+        opacity: 0.55;
+        cursor: progress;
+      }
+      #entry-button[hidden],
+      #entry-demo[hidden] {
+        display: none;
+      }
+      #entry-note {
+        margin: 0;
+        font-size: 15px;
+        opacity: 0.6;
+      }
+      #entry-demo {
+        color: #63f5d8;
+      }
+    </style>
   </head>
-  <body style="margin: 0">
+  <body>
     <div id="scene-container"></div>
+    <main id="entry">
+      <h1>orbly</h1>
+      <p id="entry-tagline"></p>
+      <button id="entry-button" type="button" disabled></button>
+      <a id="entry-demo" hidden></a>
+      <p id="entry-note"></p>
+    </main>
     <script type="module" src="/src/index.ts"></script>
   </body>
 </html>
