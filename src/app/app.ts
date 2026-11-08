@@ -168,6 +168,7 @@ export class OrblyApp implements DemoHost {
   private pinning = false;
   private anchorChanged = false;
   private lookingForSong = false;
+  private warmedUp = false;
   private searchTime = 0;
   private sinceMemoryCheck = 0;
   private readonly backdrop = new Backdrop();
@@ -308,6 +309,7 @@ export class OrblyApp implements DemoHost {
     const space = this.world.xrReferenceSpace;
     if (frame !== null && session !== undefined && space !== null) {
       this.anchorBackend.beginFrame(frame, space, session);
+      this.warmUp();
       if (this.stage === null) this.calibrate();
       this.hands.read(frame, session, space);
     } else {
@@ -692,6 +694,23 @@ export class OrblyApp implements DemoHost {
     }
   }
 
+  /**
+   * three.js compiles a shader the first time something using it is drawn,
+   * and on a headset that stalls a frame or several: the first pinch, the
+   * first menu, the first concert would each stutter. Everything is compiled
+   * up front instead, hidden things included. It must happen inside an XR
+   * frame, where the headset's render target is bound, or the shaders would
+   * be built for the wrong target and compiled again later anyway.
+   */
+  private warmUp(): void {
+    if (this.warmedUp) return;
+    this.warmedUp = true;
+    const { renderer, scene } = this.world;
+    renderer
+      .compileAsync(this.root, renderer.xr.getCamera(), scene)
+      .catch(() => undefined);
+  }
+
   /** Spends less per frame on what orbly does not use. */
   private tuneForHeadset(session: XRSession | undefined): void {
     this.world.renderer.xr.setFoveation(1);
@@ -967,8 +986,12 @@ export class OrblyApp implements DemoHost {
       open = this.palm.update(left.joints, 'left', head, pinching, dt);
       anchor = left.joints.middleMeta;
     } else {
-      this.palm.update(null, 'left', head, false, dt);
+      // A palm hidden for a moment by the other hand keeps its menu in place:
+      // the joints still hold where the hand was last seen.
+      open = this.palm.update(null, 'left', head, false, dt);
+      anchor = left.joints.middleMeta;
       if (left.kind === 'controller') {
+        anchor = left.pinchPoint;
         if (left.menuPressed && !this.menuButtonWasDown) {
           this.controllerMenuOpen = !this.controllerMenuOpen;
         }

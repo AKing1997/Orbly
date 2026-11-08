@@ -183,6 +183,11 @@ const PALM_OFF_FACING = 0.05;
 const PALM_ON_DWELL = 0.22;
 const PALM_OFF_DWELL = 0.18;
 const PALM_MAX_HEAD_DISTANCE = 0.85;
+/**
+ * The right hand reaching over to press the menu hides the left one from the
+ * cameras, over and over. That is not the user closing the menu.
+ */
+const PALM_LOST_GRACE = 0.4;
 
 export function fingerReach(hand: HandJoints): number {
   return (
@@ -198,6 +203,7 @@ export function fingerReach(hand: HandJoints): number {
 export class PalmUpDetector {
   private active = false;
   private candidateTime = 0;
+  private lostTime = 0;
   private readonly normal: Vec3Like = { x: 0, y: 0, z: 0 };
 
   get isActive(): boolean {
@@ -211,17 +217,19 @@ export class PalmUpDetector {
     pinching: boolean,
     dt: number,
   ): boolean {
-    const wanted = hand !== null && !pinching &&
-      this.matches(hand, handedness, head);
+    if (hand === null) {
+      this.candidateTime = 0;
+      if (this.active) {
+        this.lostTime += dt;
+        if (this.lostTime >= PALM_LOST_GRACE) this.reset();
+      }
+      return this.active;
+    }
+    this.lostTime = 0;
+    const wanted = !pinching && this.matches(hand, handedness, head);
     if (wanted === this.active) {
       this.candidateTime = 0;
       return this.active;
-    }
-    // Losing tracking closes the menu without waiting for the dwell.
-    if (hand === null) {
-      this.candidateTime = 0;
-      this.active = false;
-      return false;
     }
     this.candidateTime += dt;
     if (this.candidateTime >= (wanted ? PALM_ON_DWELL : PALM_OFF_DWELL)) {
@@ -234,6 +242,7 @@ export class PalmUpDetector {
   reset(): void {
     this.active = false;
     this.candidateTime = 0;
+    this.lostTime = 0;
   }
 
   private matches(
@@ -261,6 +270,11 @@ export class PalmUpDetector {
 }
 
 const VELOCITY_WINDOW = 0.1;
+/**
+ * When tracking drops out, the newest sample can be the only one in the
+ * window. The last one before the gap still says how fast the hand went.
+ */
+const VELOCITY_MAX_SPAN = 0.35;
 const SAMPLE_CAPACITY = 16;
 
 /** Hand speed over the last ~100 ms, averaging out single-frame jumps. */
@@ -296,8 +310,11 @@ export class VelocityTracker {
     let oldest = newest;
     for (let i = 1; i < this.count; i++) {
       const index = (newest - i + SAMPLE_CAPACITY * 2) % SAMPLE_CAPACITY;
-      if (newestTime - this.times[index] > VELOCITY_WINDOW) break;
+      const age = newestTime - this.times[index];
+      const spanning = oldest === newest && age <= VELOCITY_MAX_SPAN;
+      if (age > VELOCITY_WINDOW && !spanning) break;
       oldest = index;
+      if (age > VELOCITY_WINDOW) break;
     }
     const dt = newestTime - this.times[oldest];
     if (dt <= 1e-4) return out;
@@ -310,6 +327,11 @@ export class VelocityTracker {
 
 /** How long a hand must keep pointing at a far orb before it can be taken. */
 export const AIM_DWELL = 0.35;
+/**
+ * A frame or two with nothing aimed at (the hand lost for a moment, the ray
+ * wobbling at the edge of the orb) does not start the wait over.
+ */
+const AIM_GAP = 0.1;
 
 /**
  * Pointing has to be deliberate. A hand pinching in the air usually happens to
@@ -320,9 +342,16 @@ export const AIM_DWELL = 0.35;
 export class AimDwell {
   private target = -1;
   private time = 0;
+  private gap = 0;
 
   /** @returns the orb that can be taken now, or -1. */
   update(candidate: number, dt: number): number {
+    if (candidate < 0 && this.target >= 0 && this.gap + dt < AIM_GAP) {
+      this.gap += dt;
+      this.time += dt;
+      return this.time >= AIM_DWELL ? this.target : -1;
+    }
+    this.gap = 0;
     if (candidate !== this.target) {
       this.target = candidate;
       this.time = 0;
@@ -335,6 +364,7 @@ export class AimDwell {
   reset(): void {
     this.target = -1;
     this.time = 0;
+    this.gap = 0;
   }
 }
 
@@ -343,6 +373,12 @@ export const LISTEN_AFTER = 9;
 /** A hand must move faster than this to count as playing again, in m/s. */
 const STILL_SPEED = 0.1;
 const SPEED_SMOOTHING = 0.15;
+/**
+ * Tracking trembles by a millimetre or so every frame. Measured raw, that
+ * alone is faster than STILL_SPEED, so a still hand would never count as
+ * still. The position is smoothed first.
+ */
+const POSITION_SMOOTHING = 0.08;
 /** A brief twitch does not end the music. */
 const WAKE_DWELL = 0.1;
 
@@ -431,12 +467,20 @@ export class ListeningDetector {
     }
     const { x, y, z } = hand.position;
     if (motion.known && dt > 0) {
-      const speed = Math.hypot(x - motion.x, y - motion.y, z - motion.z) / dt;
+      const k = Math.min(1, dt / POSITION_SMOOTHING);
+      const dx = (x - motion.x) * k;
+      const dy = (y - motion.y) * k;
+      const dz = (z - motion.z) * k;
+      const speed = Math.hypot(dx, dy, dz) / dt;
       motion.speed += (speed - motion.speed) * Math.min(1, dt / SPEED_SMOOTHING);
+      motion.x += dx;
+      motion.y += dy;
+      motion.z += dz;
+    } else {
+      motion.x = x;
+      motion.y = y;
+      motion.z = z;
     }
-    motion.x = x;
-    motion.y = y;
-    motion.z = z;
     motion.known = true;
     return y >= restY && motion.speed >= STILL_SPEED;
   }

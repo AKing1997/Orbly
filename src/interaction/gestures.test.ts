@@ -206,10 +206,11 @@ describe('PalmUpDetector', () => {
     expect(run(detector, simulateHand('left', down, forward), 0.5)).toBe(false);
   });
 
-  it('closes at once when tracking is lost', () => {
+  it('stays open through a brief loss of tracking, then closes', () => {
     const detector = new PalmUpDetector();
     run(detector, simulateHand('left', up, forward), 0.5);
-    expect(detector.update(null, 'left', head, false, DT)).toBe(false);
+    expect(run(detector, null, 0.2)).toBe(true);
+    expect(run(detector, null, 0.4)).toBe(false);
   });
 });
 
@@ -234,10 +235,17 @@ describe('AimDwell', () => {
     expect(hold(aim, 4, AIM_DWELL * 0.5)).toBe(-1);
   });
 
-  it('lets go at once when the hand stops pointing', () => {
+  it('lets go soon after the hand stops pointing', () => {
     const aim = new AimDwell();
     hold(aim, 3, AIM_DWELL * 1.5);
-    expect(aim.update(-1, DT)).toBe(-1);
+    expect(hold(aim, -1, 0.12)).toBe(-1);
+  });
+
+  it('starts over after a real pause, not a lost frame', () => {
+    const aim = new AimDwell();
+    hold(aim, 3, AIM_DWELL * 0.8);
+    hold(aim, -1, 0.2);
+    expect(hold(aim, 3, AIM_DWELL * 0.5)).toBe(-1);
   });
 
   it('never reports pointing at nothing', () => {
@@ -580,11 +588,307 @@ describe('GrabController', () => {
     expect(host.log).toEqual([]);
   });
 
+  it('throws an orb whose hand vanished mid-swing', () => {
+    const { host, grab } = setup();
+    grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
+    const speed = THROW_SPEED * 1.5;
+    let t = 0;
+    for (let i = 1; i <= 20; i++) {
+      t = i * DT;
+      grab.update({ x: t * speed, y: 1, z: -0.3 }, hold, true, t, DT);
+    }
+    grab.update(null, hold, true, t + DT, DT);
+    expect(host.log.at(-1)).not.toMatch(/fling|drop/);
+    grab.update(null, end, true, t + 2 * DT, DT);
+    expect(host.log.at(-1)).toBe('fling 1');
+  });
+
   it('releases safely when the hand disappears', () => {
     const { host, grab } = setup();
     grab.update({ x: 0, y: 1, z: -0.3 }, start, true, 0, DT);
     grab.update(null, open, true, DT, DT);
     expect(host.log.at(-1)).toBe('drop 1');
     expect(grab.held).toBe(-1);
+  });
+});
+
+/**
+ * The tests above feed clean joints, like the emulator. Real hand tracking
+ * trembles by a millimetre or two, sometimes puts a joint a couple of
+ * centimetres off for a single frame, and loses a hand for a moment when it
+ * moves fast or hides behind the other one. These replay the same gestures
+ * through the same detectors with that noise on top, over many seeds.
+ */
+describe('with real-hand noise', () => {
+  const SEEDS = 200;
+  /** Millimetre-scale tremble on every joint, every frame. */
+  const JITTER = 0.0015;
+  const SPIKE_CHANCE = 1 / 90;
+  const SPIKE = 0.02;
+
+  /** Deterministic noise, so a failing seed can be replayed. */
+  const random = (seed: number) => {
+    let state = (seed * 2654435761) >>> 0;
+    const next = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const gauss = () =>
+      Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
+    const shake = (p: Vec3Like, amount = JITTER): Vec3Like => {
+      const spike = next() < SPIKE_CHANCE ? SPIKE : 0;
+      return {
+        x: p.x + gauss() * amount + spike,
+        y: p.y + gauss() * amount,
+        z: p.z + gauss() * amount,
+      };
+    };
+    return { next, gauss, shake };
+  };
+
+  const CLOSED = 0.012;
+  const OPEN = 0.065;
+  /** Fingers that close at `from` and part at `to`, each over ~70 ms. */
+  const pinchBetween = (from: number, to: number) => (t: number) => {
+    const close = Math.min(1, Math.max(0, (t - from) / 0.07));
+    const part = Math.min(1, Math.max(0, (t - to) / 0.07));
+    return OPEN + (CLOSED - OPEN) * close + (OPEN - CLOSED) * part;
+  };
+
+  class Host implements OrbHost {
+    flings = 0;
+    drops = 0;
+    creates = 0;
+    pick(): number {
+      return -1;
+    }
+    pickFar(): number {
+      return -1;
+    }
+    create(): number {
+      this.creates++;
+      return this.creates;
+    }
+    beginDrag(): void {}
+    recall(): void {}
+    drag(): void {}
+    drop(): void {
+      this.drops++;
+    }
+    fling(): void {
+      this.flings++;
+    }
+    setHover(): void {}
+  }
+
+  /**
+   * One gesture through the pipeline the app runs every frame: thumb-index
+   * gap into the pinch detector, its edges and the hand into the grab
+   * controller. `lost` drops the hand out of tracking.
+   */
+  const perform = (
+    seed: number,
+    seconds: number,
+    path: (t: number) => Vec3Like,
+    gap: (t: number) => number,
+    lost: (t: number) => boolean = () => false,
+  ) => {
+    const rng = random(seed);
+    const host = new Host();
+    const pinch = new PinchDetector();
+    const grab = new GrabController(1, host);
+    let starts = 0;
+    for (let t = 0; t < seconds; t += DT) {
+      if (lost(t)) {
+        const edges = pinch.update(null, DT);
+        grab.update(null, edges, true, t, DT, null);
+        continue;
+      }
+      const hand = path(t);
+      const steady = rng.shake(hand, JITTER * 0.6);
+      const point = rng.shake({ x: hand.x, y: hand.y + 0.02, z: hand.z - 0.08 });
+      const measured = Math.max(0.003, gap(t) + rng.gauss() * 0.002 +
+        (rng.next() < SPIKE_CHANCE ? -0.03 : 0));
+      const edges = pinch.update(measured, DT);
+      if (edges.started) starts++;
+      grab.update(point, edges, true, t, DT, steady);
+    }
+    return { host, starts, held: grab.held };
+  };
+
+  const rest = { x: 0.15, y: 1.0, z: -0.3 };
+  const still = () => rest;
+  const count = (run: (seed: number) => boolean) => {
+    let passed = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) if (run(seed)) passed++;
+    return passed;
+  };
+
+  it('never pinches an open hand by itself', () => {
+    expect(count((seed) => perform(seed, 4, still, () => OPEN).starts === 0))
+      .toBe(SEEDS);
+  });
+
+  it('holds one steady pinch as one pinch', () => {
+    const passed = count((seed) => {
+      const { starts, host } = perform(seed, 2, still, pinchBetween(0.2, 1.4));
+      return starts === 1 && host.creates === 1 && host.drops === 1;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  it('places a slowly moved orb and never throws it', () => {
+    const slow = (t: number) => ({ x: rest.x + Math.min(t, 1) * 0.12, y: rest.y, z: rest.z });
+    const passed = count((seed) => {
+      const { host } = perform(seed, 1.6, slow, pinchBetween(0.2, 1.1));
+      return host.drops === 1 && host.flings === 0;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  /** Hold still, then swing forward at 2.6 m/s and let go mid-swing. */
+  const SWING_AT = 0.5;
+  const RELEASE_AT = 0.68;
+  const swing = (t: number) => {
+    const moving = Math.max(0, t - SWING_AT);
+    const speed = 2.6;
+    // Ramps up over 60 ms, then keeps going: a real throw.
+    const travel = moving < 0.06
+      ? (speed * moving * moving) / 0.12
+      : speed * 0.03 + speed * (moving - 0.06);
+    return { x: rest.x, y: rest.y + travel * 0.25, z: rest.z - travel };
+  };
+
+  it('throws on a fast release', () => {
+    const passed = count((seed) => {
+      const { host } = perform(seed, 1.4, swing, pinchBetween(0.1, RELEASE_AT));
+      return host.flings === 1 && host.drops === 0;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  it('throws even when tracking drops out at the end of the swing', () => {
+    // Fast hands blur: tracking goes 40 ms before the fingers open and only
+    // comes back half a second later, with the hand already open.
+    const passed = count((seed) => {
+      const { host } = perform(
+        seed,
+        1.6,
+        swing,
+        pinchBetween(0.1, RELEASE_AT),
+        (t) => t > RELEASE_AT - 0.04 && t < RELEASE_AT + 0.5,
+      );
+      return host.flings === 1 && host.drops === 0;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  it('throws when a short dropout swallows the moment of release', () => {
+    // Back after 120 ms, fingers already apart: the release was never seen.
+    const passed = count((seed) => {
+      const { host } = perform(
+        seed,
+        1.6,
+        swing,
+        pinchBetween(0.1, RELEASE_AT),
+        (t) => t > RELEASE_AT - 0.06 && t < RELEASE_AT + 0.06,
+      );
+      return host.flings === 1 && host.drops === 0;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  it('keeps an orb held through a brief dropout while dragging', () => {
+    const slow = (t: number) => ({ x: rest.x + t * 0.05, y: rest.y, z: rest.z });
+    const passed = count((seed) => {
+      const { host, held } = perform(
+        seed,
+        1.2,
+        slow,
+        () => CLOSED,
+        (t) => t > 0.5 && t < 0.62,
+      );
+      return held >= 0 && host.drops === 0 && host.flings === 0;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  const shakeHand = (hand: HandJoints, rng: ReturnType<typeof random>): HandJoints => {
+    const out = createHandJoints();
+    for (const key of Object.keys(hand) as (keyof HandJoints)[]) {
+      out[key] = rng.shake(hand[key]);
+    }
+    return out;
+  };
+
+  it('keeps the palm menu open while the other hand reaches over it', () => {
+    // Poking the menu hides the left hand from the cameras for a moment,
+    // again and again. The menu must not blink shut under the finger.
+    const palm = simulateHand('left', up, forward);
+    const passed = count((seed) => {
+      const rng = random(seed);
+      const detector = new PalmUpDetector();
+      let shut = false;
+      for (let t = 0; t < 3; t += DT) {
+        const covered = t > 0.6 && (t % 0.5) < 0.15 + (seed % 5) * 0.03;
+        const open = detector.update(
+          covered ? null : shakeHand(palm, rng),
+          'left',
+          head,
+          false,
+          DT,
+        );
+        if (t > 0.5 && !open) shut = true;
+      }
+      return !shut;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  it('still closes the palm menu when the hand is gone for good', () => {
+    const detector = new PalmUpDetector();
+    const palm = simulateHand('left', up, forward);
+    for (let t = 0; t < 0.5; t += DT) detector.update(palm, 'left', head, false, DT);
+    let open = true;
+    for (let t = 0; t < 0.6; t += DT) open = detector.update(null, 'left', head, false, DT);
+    expect(open).toBe(false);
+  });
+
+  it('starts the concert for hands held still in the air', () => {
+    const passed = count((seed) => {
+      const rng = random(seed);
+      const detector = new ListeningDetector();
+      const hand = { x: 0.2, y: 1.0, z: -0.3 };
+      let listening = false;
+      for (let t = 0; t < LISTEN_AFTER * 1.2; t += DT) {
+        listening = detector.update(
+          [
+            { position: rng.shake(hand, JITTER * 0.6), pinching: false },
+            { position: null, pinching: false },
+          ],
+          0.7,
+          true,
+          DT,
+        );
+      }
+      return listening;
+    });
+    expect(passed).toBe(SEEDS);
+  });
+
+  it('keeps aiming at a far orb through single lost frames', () => {
+    const passed = count((seed) => {
+      const rng = random(seed);
+      const aim = new AimDwell();
+      for (let t = 0; t < AIM_DWELL + 0.25; t += DT) {
+        const candidate = rng.next() < 0.06 ? -1 : 3;
+        if (aim.update(candidate, DT) === 3) return true;
+      }
+      return false;
+    });
+    expect(passed).toBe(SEEDS);
   });
 });

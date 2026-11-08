@@ -40,7 +40,7 @@ export class XRAnchorBackend implements AnchorBackend {
     );
     const anchor = await frame.createAnchor(pose, space);
     // Without a handle it would vanish with the session: not worth keeping.
-    const uuid = await anchor.requestPersistentHandle?.();
+    const uuid = await anchor.requestPersistentHandle?.().catch(() => undefined);
     if (uuid === undefined) {
       anchor.delete();
       return null;
@@ -53,12 +53,24 @@ export class XRAnchorBackend implements AnchorBackend {
     return anchor === undefined ? null : this.wrap(uuid, anchor);
   }
 
+  // Without the anchors feature (not offered, or declined) these may throw
+  // rather than return nothing. Room memory is a bonus: it must never stop
+  // the session from starting.
+
   remove(uuid: string): void {
-    this.session?.deletePersistentAnchor?.(uuid)?.catch(() => undefined);
+    try {
+      this.session?.deletePersistentAnchor?.(uuid)?.catch(() => undefined);
+    } catch {
+      // Nothing to free.
+    }
   }
 
   list(): readonly string[] {
-    return this.session?.persistentAnchors ?? [];
+    try {
+      return this.session?.persistentAnchors ?? [];
+    } catch {
+      return [];
+    }
   }
 
   private wrap(uuid: string, anchor: XRAnchor): RoomAnchor {
@@ -67,7 +79,11 @@ export class XRAnchorBackend implements AnchorBackend {
       pose: () => {
         const { frame, space } = this;
         if (frame === null || space === null) return null;
-        return frame.getPose(anchor.anchorSpace, space)?.transform.matrix ?? null;
+        try {
+          return frame.getPose(anchor.anchorSpace, space)?.transform.matrix ?? null;
+        } catch {
+          return null;
+        }
       },
     };
   }

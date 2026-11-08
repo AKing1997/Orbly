@@ -46,6 +46,12 @@ export class RoomPulse {
   private readonly beamColor = new Vector3(1, 1, 1);
   private nextWave = 0;
   private sinceScan = SCAN_INTERVAL;
+  /**
+   * False once the browser refuses to share the room's planes, as Chromium
+   * does by throwing when the user declined spatial data. The dome then
+   * stands in for the room for the rest of the session.
+   */
+  private planesAllowed = true;
 
   constructor() {
     this.material = lightMaterial({
@@ -146,15 +152,25 @@ export class RoomPulse {
       this.strengths[i] *= Math.exp(-dt * WAVE_FADE);
     }
     this.sinceScan += dt;
-    if (frame === null || space === null || this.sinceScan < SCAN_INTERVAL) {
+    if (
+      frame === null || space === null || !this.planesAllowed ||
+      this.sinceScan < SCAN_INTERVAL
+    ) {
       return;
     }
     this.sinceScan = 0;
-    const detected = (frame as FrameWithPlanes).detectedPlanes;
+    let detected: XRPlaneSet | undefined;
+    try {
+      detected = (frame as FrameWithPlanes).detectedPlanes;
+    } catch {
+      this.planesAllowed = false;
+      return;
+    }
     if (detected !== undefined) this.sync(detected, frame, space);
   }
 
   clear(): void {
+    this.planesAllowed = true;
     this.planes.clear();
     this.surfaces = [];
     this.setGeometry(new BufferGeometry());

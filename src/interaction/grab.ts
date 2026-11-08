@@ -69,7 +69,7 @@ export class GrabController {
   ): void {
     if (point === null) {
       this.setHover(-1);
-      if (this.heldId >= 0 && !pinch.active) this.cancelToLastPoint();
+      if (this.heldId >= 0 && !pinch.active) this.releaseUnseen();
       return;
     }
 
@@ -144,6 +144,24 @@ export class GrabController {
     const id = this.heldId;
     this.heldId = -1;
     this.host.drop(id, this.lastPoint);
+  }
+
+  /**
+   * The hand was lost and the pinch timed out without being seen to open. A
+   * fast hand is exactly what tracking loses, so if it was swinging when it
+   * vanished, that was a throw. Otherwise the orb stays where it was last seen.
+   */
+  private releaseUnseen(): void {
+    const velocity = this.tracker.velocity(this.velocity);
+    const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
+    if (speed >= THROW_SPEED && this.heldFor >= MIN_HOLD_BEFORE_THROW) {
+      const id = this.heldId;
+      this.heldId = -1;
+      this.host.fling(id, velocity);
+    } else {
+      this.cancelToLastPoint();
+    }
+    this.tracker.clear();
   }
 
   /** @param measured true when `velocity` was captured as the fingers parted. */

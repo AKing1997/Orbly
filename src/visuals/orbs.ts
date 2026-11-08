@@ -23,6 +23,14 @@ import { Palette, PALETTES } from './palettes';
 
 export const ORB_RADIUS = 0.032;
 const HALO_SCALE = 7.5;
+/**
+ * The glow is invisible past 80% of the halo's width, but every pixel of the
+ * quad is still shaded and blended. Halos overlap right in front of the face,
+ * so the quad is cut down to where the light is (36% fewer pixels) and the
+ * falloff rescaled to reach zero exactly at its edge.
+ */
+const HALO_EXTENT = 0.8;
+const HALO_EDGE = Math.exp(-5 * HALO_EXTENT * HALO_EXTENT);
 const MOVE_RATE = 14;
 const COLOR_RATE = 8;
 const DISSOLVE_SECONDS = 0.4;
@@ -77,9 +85,9 @@ export function createHaloMaterial(): ShaderMaterial {
       varying float vEnergy;
       void main() {
         vec4 center = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-        float size = length(instanceMatrix[0].xyz);
+        float size = length(instanceMatrix[0].xyz) * ${HALO_EXTENT.toFixed(3)};
         center.xy += position.xy * size;
-        vUv = uv - 0.5;
+        vUv = (uv - 0.5) * ${HALO_EXTENT.toFixed(3)};
         vColor = aColor;
         vEnergy = aEnergy;
         gl_Position = projectionMatrix * center;
@@ -91,7 +99,7 @@ export function createHaloMaterial(): ShaderMaterial {
       varying float vEnergy;
       void main() {
         float d = length(vUv) * 2.0;
-        float falloff = exp(-d * d * 5.0) - 0.0067;
+        float falloff = (exp(-d * d * 5.0) - ${HALO_EDGE.toFixed(5)}) / ${(1 - HALO_EDGE).toFixed(5)};
         if (falloff <= 0.0) discard;
         float intensity = falloff * (0.34 + vEnergy * 0.95);
         gl_FragColor = vec4(vColor * intensity, intensity * 0.28);
